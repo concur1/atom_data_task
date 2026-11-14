@@ -12,9 +12,22 @@ dependencies = [
 [dependency-groups]
 dev = [
     "marimo>=0.25.2",
+    "polars>=2.1.0",
     "pre-commit>=4.7.0",
+    "pyyaml>=6.0.3",
     "regex>=2026.11.9",
     "ruff>=0.17.5",
     "sqruff>=0.44.0",
     "ty>=0.0.104",
+    "tzdata>=2026.6",
 ]
+
+[tool.uv]
+# dbt-core 1.12 requires this sdist, whose build downloads a ~175MB binary from
+# GitHub (fails behind TLS-intercepting proxies / without system CAs). It is
+# only used with `dbt --use-v2-parser`, which we don't use, so never install it.
+override-dependencies = ["dbt-core-experimental-parser; sys_platform == 'never'"]
+
+[tool.ruff.lint.per-file-ignores]
+# marimo cells end in a bare `return` and display a value by evaluating it.
+"notebooks/*.py" = ["PLR1711", "B018"]
