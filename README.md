@@ -29,6 +29,11 @@ one), separated by folder and the `<layer>__<entity>` model-name prefix:
 | silver | `models/silver/` | Cleaned, conformed data. _TODO_ |
 | gold   | `models/gold/`   | The SATs score output. _TODO_ |
 
+## Design decisions
+
+The data model and point-in-time semantics are recorded in
+[`docs/adr/0001-scoring-data-model.md`](docs/adr/0001-scoring-data-model.md).
+
 ## What I built
 
 _TODO_
