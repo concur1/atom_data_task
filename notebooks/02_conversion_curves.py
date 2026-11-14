@@ -25,7 +25,8 @@ def _(mo):
 
     **Data:** `seeds/ks2_scaled_score_conversion.csv`, built from the GOV.UK
     tables in `reference_docs/` by `scripts/build_ks2_conversion_seed.py`
-    (2024-2026; reading /50, maths /110, GPS /70). Runs offline - no BigQuery.
+    (2024-2026; reading /50, maths /110, GPS /70). Sections 1-8 run offline;
+    section 9 queries BigQuery.
     """)
     return
 
@@ -606,18 +607,184 @@ def _(mo):
     - Fitted $p_{cut}$ sits at 0.48-0.54 in every table: the expected standard
       is consistently "about half the marks".
 
-    ## 8. Options for scoring Atom subjects (decision pending)
+    ## 8. Decision
 
     | Option | Maths / English | Other subjects | Reproducible as | Faithfulness |
     |---|---|---|---|---|
     | A. Real tables + generic curve | KS2 table | averaged curve | a dbt model over the seed | exact / ~1 pt |
     | B. Real tables + logit formula | KS2 table | universal formula | seed + 1 SQL expression | exact / ~1 pt |
-    | C. Logit formula everywhere | universal formula | universal formula | 1 SQL expression | ~1 pt |
+    | **C. Logit formula everywhere** | universal formula | universal formula | 1 SQL expression | ~1 pt |
 
-    Common to all: map **% correct → proportion of marks** directly (assumes
-    Atom assessments ≈ KS2 difficulty, 1 question ≈ 1 mark); below the minimum
-    (~4% / 3 marks) → **no scaled score (N)**, never rounded up to 80; record
-    the method and table year used in the output.
+    **Chosen: C.** The real tables convert marks on one specific KS2 paper;
+    an Atom assessment is a different test, so reading its % off a KS2 table
+    is no more "real" than the formula. One KS2-shaped curve for every
+    subject keeps the method uniform and explainable:
+
+    $$SC = \text{clamp}_{80}^{120}\Big\lfloor 100 + 7.3\,\big(\text{logit}(p) - \text{logit}(0.5)\big) \Big\rfloor,\qquad \text{N if } p < 0.05$$
+
+    - Constants come from the KS2 tables (more data than this sample), not
+      from Atom data. $p_{cut}$ is rounded from 0.498 to 0.5.
+    - Assumes an Atom assessment ≈ a KS2 paper in difficulty and 1 question ≈
+      1 mark. **Next step with more data:** estimate question difficulty from
+      Atom responses and use it to adjust ability (a simplified version of
+      STA's equating), keeping the same formula.
+    - The 2016 standard-setting exercise (which defines *what* 100 means) is
+      not reproduced; we inherit its result through the fitted curve.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 9. The formula on Atom data
+
+    Qualifying sittings from `de_raw` (complete, not deleted, not survey /
+    adaptive, year group ≤ 6; one answer per question, correct only if every
+    duplicate copy is correct - see notebook 01). **Needs BigQuery.**
+    """)
+    return
+
+
+@app.cell
+def _(pl):
+    import os
+
+    from google.cloud import bigquery
+    from google.oauth2.credentials import Credentials
+
+    _project = os.environ.get("DBT_GCP_PROJECT", "atom-analytics-candidates")
+    _token = os.environ.get("CLOUDSDK_AUTH_ACCESS_TOKEN")
+    _client = bigquery.Client(
+        project=_project,
+        location="europe-west2",
+        credentials=Credentials(_token) if _token else None,
+    )
+    _raw = f"`{_project}.de_raw`"
+    atom_sittings = pl.from_arrow(
+        _client.query(f"""
+        with qualifying_sittings as (
+            select session_id
+            from {_raw}.assessment_sittings
+            where
+                is_complete
+                and not is_deleted
+                and style not in ('survey', 'adaptive')
+                and year_group_at_sitting <= 6
+        ),
+
+        answers as (
+            select
+                r.session_id,
+                r.question_id,
+                ch.subject_name,
+                logical_and(r.is_correct) as is_correct
+            from {_raw}.responses as r
+            inner join qualifying_sittings as s on r.session_id = s.session_id
+            inner join {_raw}.course_hierarchy as ch on r.question_id = ch.question_id
+            group by r.session_id, r.question_id, ch.subject_name
+        )
+
+        select
+            session_id,
+            subject_name,
+            count(*) as questions,
+            countif(is_correct) as correct
+        from answers
+        group by session_id, subject_name
+        """).to_arrow()
+    )
+    assert isinstance(atom_sittings, pl.DataFrame)
+    return (atom_sittings,)
+
+
+@app.cell
+def _(atom_sittings, logit_formula, pl, tables):
+    K, P_CUT, MIN_P = 7.3, 0.5, 0.05
+    KS2_TABLE_FOR = {"Maths": ("maths", 110), "English": ("reading", 50)}
+
+    _p = (atom_sittings["correct"] / atom_sittings["questions"]).to_numpy()
+    atom_scored = atom_sittings.with_columns(
+        p=pl.Series(_p),
+        scaled_score=pl.when(pl.Series(_p) >= MIN_P).then(
+            pl.Series(logit_formula(_p, K, P_CUT)).cast(pl.Int64)
+        ),
+    )
+
+    # Reading Maths / English off the real 2026 tables, for comparison only.
+    _t2026 = tables.filter(pl.col("test_year") == 2026).select(
+        "ks2_subject", "raw_score", pl.col("scaled_score").alias("table_2026_score")
+    )
+    vs_table = (
+        atom_scored.filter(pl.col("subject_name").is_in(list(KS2_TABLE_FOR)))
+        .with_columns(
+            ks2_subject=pl.col("subject_name").replace_strict(
+                {k: v[0] for k, v in KS2_TABLE_FOR.items()}
+            ),
+            raw_score=pl.col("correct")
+            * pl.col("subject_name").replace_strict(
+                {k: v[1] for k, v in KS2_TABLE_FOR.items()}, return_dtype=pl.Int64
+            )
+            // pl.col("questions"),
+        )
+        .join(_t2026, on=["ks2_subject", "raw_score"], how="left")
+    )
+
+    atom_scored.group_by("subject_name").agg(
+        sittings=pl.len(),
+        no_score_n=pl.col("scaled_score").is_null().sum(),
+        mean_pct=(100 * pl.col("p").mean()).round(1),
+        mean_score=pl.col("scaled_score").mean().round(1),
+        median_score=pl.col("scaled_score").median(),
+        pct_at_expected=(100 * (pl.col("scaled_score") >= 100).mean()).round(1),
+        pct_at_120=(100 * (pl.col("scaled_score") == 120).mean()).round(1),
+    ).sort("sittings", descending=True)
+    return (atom_scored, vs_table)
+
+
+@app.cell
+def _(alt, atom_scored, mo):
+    mo.ui.altair_chart(
+        alt.Chart(atom_scored.drop_nulls("scaled_score"))
+        .mark_bar()
+        .encode(
+            x=alt.X("scaled_score:Q", bin=alt.Bin(step=2), title="Scaled score"),
+            y=alt.Y("count():Q", title="Sittings"),
+            row=alt.Row("subject_name:N", title=None),
+        )
+        .properties(
+            width=600, height=70, title="Scaled score per sitting (logit formula)"
+        )
+    )
+    return
+
+
+@app.cell
+def _(pl, vs_table):
+    vs_table.drop_nulls(["scaled_score", "table_2026_score"]).with_columns(
+        diff=pl.col("scaled_score") - pl.col("table_2026_score")
+    ).group_by("subject_name").agg(
+        sittings=pl.len(),
+        mean_diff=pl.col("diff").mean().round(2),
+        mean_abs_diff=pl.col("diff").abs().mean().round(2),
+        max_abs_diff=pl.col("diff").abs().max(),
+        same_expected_standard_outcome=(
+            100
+            * (
+                (pl.col("scaled_score") >= 100) == (pl.col("table_2026_score") >= 100)
+            ).mean()
+        ).round(1),
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    **Reading the results:** the summary shows each subject's score
+    distribution and how many sittings get no score (N). The comparison shows
+    how far the formula sits from reading Maths / English off the real 2026
+    tables, and how often the two agree on "met the expected standard".
     """)
     return
 

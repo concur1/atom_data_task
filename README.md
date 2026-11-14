@@ -64,11 +64,21 @@ Evidence for each is in [`notebooks/01_exploration.py`](notebooks/01_exploration
 
 Scoring follows the KS2 rules in the GOV.UK guidance where they apply.
 
-- **Subjects and conversion:** _under review_ - every subject is to be scored
-  ("best effort", as the brief asks). Options and evidence are in
-  [`notebooks/02_conversion_curves.py`](notebooks/02_conversion_curves.py):
-  real KS2 tables for Maths/English plus a generic curve or a formula derived
-  from STA's published scaling equation for the other subjects.
+- **Conversion to the 80-120 scale:** one KS2-shaped formula for every
+  subject, `least(120, greatest(80, floor(100 + 7.3 * ln(p / (1 - p)))))`,
+  where `p` is the proportion of questions correct; no score (`N`) if
+  `p < 0.05`. STA's documented scaling is linear in IRT ability, and
+  `logit(p)` approximates ability, so this reproduces the official 2024-2026
+  KS2 tables to ~1 point on average (fit and evidence in
+  [`notebooks/02_conversion_curves.py`](notebooks/02_conversion_curves.py)).
+  The real tables aren't applied directly because an Atom assessment isn't
+  the KS2 paper they were calibrated on.
+- **Assumes** an Atom assessment is about as hard as a KS2 paper and one
+  question is worth one mark. With more data, question difficulty could be
+  estimated from Atom responses to adjust for this.
+- **Subjects:** every subject with qualifying sittings is scored (English,
+  Maths, Screeners, Verbal and Non-Verbal Reasoning). Science has questions
+  but no sittings; Wellbeing sittings are all surveys (no right answers).
 - **Qualifying sittings:** complete, not deleted, not a survey and not an
   adaptive mock (adaptive difficulty makes % correct incomparable), year group
   1-6. KS2 precedent: a pupil must sit every paper to receive a score.
