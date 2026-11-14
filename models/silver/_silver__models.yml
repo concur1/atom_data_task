@@ -1,0 +1,47 @@
+version: 2
+
+models:
+  - name: silver__sittings
+    description: >
+      One row per assessment sitting (pupils marked deleted are dropped), with
+      the scoring rules applied as flags. `is_scorable` is true when
+      `exclusion_reason` is null.
+    columns:
+      - name: session_id
+        description: Sitting identifier (natural key).
+      - name: response_rows
+        description: Raw response rows for the sitting (before de-duplication).
+      - name: exclusion_reason
+        description: >
+          Why the sitting isn't scored, in precedence order: `deleted`,
+          `incomplete`, `survey`, `adaptive`, `year_group_above_6`,
+          `no_responses`. Null when scorable.
+      - name: is_scorable
+        description: True when the sitting feeds a scaled score.
+
+  - name: silver__answers
+    description: >
+      One row per (sitting, question): duplicate response rows collapsed.
+      Correct only if every copy is correct.
+    columns:
+      - name: answer_id
+        description: Surrogate key, hash of (session_id, question_id).
+      - name: response_copies
+        description: Raw response rows collapsed into this answer.
+      - name: has_conflicting_copies
+        description: True when the copies disagreed on `is_correct`.
+
+  - name: silver__sitting_scores
+    description: >
+      One row per scorable sitting and subject: questions, correct answers,
+      proportion correct `p` and the KS2-shaped scaled score.
+    columns:
+      - name: p
+        description: Proportion of questions answered correctly (no-attempts count as wrong).
+      - name: scaled_score
+        description: >
+          `ks2_scaled_score(p)`: 80-120, null below the minimum (`ks2_min_p`).
+      - name: score_status
+        description: "`SCORED`, or `N` when there is no scaled score."
+      - name: meets_expected_standard
+        description: Scaled score of 100 or more (false for `N`).

@@ -22,3 +22,12 @@ models:
       +materialized: view
     gold:
       +materialized: table
+
+vars:
+  # KS2-shaped logit formula (docs/adr/0001, notebooks/02_conversion_curves.py):
+  # scaled = clamp(floor(100 + slope * (logit(p) - logit(p_cut))), 80, 120);
+  # no score below min_p. Fitted to the official 2024-2026 KS2 tables.
+  ks2_logit_slope: 7.3
+  ks2_logit_p_cut: 0.5
+  ks2_min_p: 0.05
+  scoring_method: ks2_logit_v1
