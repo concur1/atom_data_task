@@ -90,7 +90,7 @@ sources:
                     field: session_id
                   config: {severity: warn}
           - name: session_type
-            description: Type of session (denormalised from the sitting).
+            description: Always `MOCK_TEST`; does not match the sitting's `session_type`, so unused.
           - name: question_id
             description: Question answered.
             data_tests:

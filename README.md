@@ -56,6 +56,8 @@ Evidence for each is in [`notebooks/01_exploration.py`](notebooks/01_exploration
   `finished_at`; 31 sittings have no `finished_at`.
 - **Soft deletes:** no pupil or sitting is currently marked `is_deleted`.
 - **Year groups:** 25 sittings (entrance exams) are in years 11, 14 and 15.
+- **Unused rows:** 61 pupils have no sittings, 79 sittings have no responses,
+  and 8,096 of 10,552 questions in `course_hierarchy` have never been answered.
 
 ## Assumptions
 

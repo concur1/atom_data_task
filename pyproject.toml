@@ -14,6 +14,7 @@ dev = [
     "marimo>=0.25.2",
     "polars>=2.1.0",
     "pre-commit>=4.7.0",
+    "pyyaml>=6.0.3",
     "regex>=2026.11.9",
     "ruff>=0.17.5",
     "sqruff>=0.44.0",

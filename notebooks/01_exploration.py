@@ -10,10 +10,11 @@ def _():
 
     import marimo as mo
     import polars as pl
+    import yaml
     from google.cloud import bigquery
     from google.oauth2.credentials import Credentials
 
-    return Credentials, bigquery, mo, os, pl
+    return Credentials, bigquery, mo, os, pl, yaml
 
 
 @app.cell
@@ -49,6 +50,249 @@ def _(Credentials, bigquery, os, pl):
         return result
 
     return RAW, q
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 0. Data model
+
+    Pupils sit assessments made up of questions; every question belongs to a
+    subject through a hierarchy of topics and subtopics.
+
+    | Table | What it holds | Grain / key | Time columns |
+    |---|---|---|---|
+    | `pupils` | The pupils on the platform. Only an id and a soft-delete flag. | one row per pupil · `pupil_id` | - |
+    | `assessment_sittings` | One attempt by a pupil at an assessment: what kind of session it was, the pupil's year group at the time, how many questions it had and whether it was finished. | one row per sitting · `session_id` | `started_at`, `finished_at` |
+    | `responses` | The pupil's answer to one question within a sitting: correct or not, skipped or not, time taken. The fact table everything is scored from. | intended one row per question answered · `response_id` (but see §5: duplicates per `(session_id, question_id)`) | `answered_at` |
+    | `course_hierarchy` | Places each question in the curriculum: question → atom → subtopic → topic → subject. Denormalised, so every level is a column. | one row per question · `question_id` | - |
+
+    Things that are **not** tables: `assessment_id` (no assessment dimension, so
+    we can't see an assessment's intended subject or length beyond
+    `total_questions`), and the atom/subtopic/topic levels have ids only, no names.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.mermaid("""
+    erDiagram
+        pupils ||--o{ assessment_sittings : "sits"
+        pupils ||--o{ responses : "answers (denormalised pupil_id)"
+        assessment_sittings ||--o{ responses : "contains (session_id)"
+        course_hierarchy ||--o{ responses : "is answered as (question_id)"
+
+        pupils {
+            string pupil_id PK
+            bool is_deleted
+        }
+        assessment_sittings {
+            string session_id PK
+            string pupil_id FK
+            string assessment_id "no table"
+            string session_type
+            string style
+            int year_group_at_sitting
+            int total_questions
+            bool is_complete
+            bool is_deleted
+            timestamp started_at
+            timestamp finished_at
+        }
+        responses {
+            string response_id PK
+            string pupil_id FK
+            string session_id FK
+            string question_id FK
+            string session_type "always MOCK_TEST"
+            bool is_correct
+            bool is_no_attempt
+            int seconds_taken
+            int question_number
+            timestamp answered_at
+        }
+        course_hierarchy {
+            string question_id PK
+            string atom_id
+            string subtopic_id
+            string topic_id
+            string subject_id
+            string subject_name
+        }
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ### Columns
+
+    Types come from BigQuery's `INFORMATION_SCHEMA`; descriptions come from the
+    dbt source definitions in `models/bronze/_de_raw__sources.yml` (one source
+    of truth for column docs).
+    """)
+    return
+
+
+@app.cell
+def _(RAW, mo, pl, q, yaml):
+    _sources_yml = mo.notebook_dir().parent / "models/bronze/_de_raw__sources.yml"
+    _source = yaml.safe_load(_sources_yml.read_text())["sources"][0]
+    _descriptions = pl.DataFrame(
+        [
+            {
+                "table_name": table["name"],
+                "column_name": column["name"],
+                "description": column.get("description", ""),
+            }
+            for table in _source["tables"]
+            for column in table.get("columns", [])
+        ]
+    )
+
+    _schema = q(f"""
+    select table_name, column_name, data_type, ordinal_position
+    from {RAW}.INFORMATION_SCHEMA.COLUMNS
+    """)
+
+    _table_order = ["pupils", "assessment_sittings", "responses", "course_hierarchy"]
+    _columns = (
+        _schema.join(_descriptions, on=["table_name", "column_name"], how="left")
+        .with_columns(
+            pl.col("table_name")
+            .replace_strict(_table_order, list(range(len(_table_order))))
+            .alias("_table_order")
+        )
+        .sort("_table_order", "ordinal_position")
+        .select("table_name", "column_name", "data_type", "description")
+    )
+    _columns
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ### Relationships, as they actually hold
+
+    For each join key: how many child rows find their parent, and the
+    cardinality seen in the data. `orphan_rows > 0` means the relationship is
+    not enforced upstream.
+
+    **Findings:** the only broken link is `responses.session_id` (1,433 orphan
+    responses). Every sitting covers exactly one subject. 61 pupils have no
+    sittings, 79 sittings have no responses, and most questions in
+    `course_hierarchy` have never been answered - the hierarchy is the whole
+    question bank, not just what was asked.
+    """)
+    return
+
+
+@app.cell
+def _(RAW, q):
+    q(f"""
+    with relationships as (
+        select
+            'assessment_sittings.pupil_id -> pupils' as relationship,
+            count(*) as child_rows,
+            countif(p.pupil_id is null) as orphan_rows
+        from {RAW}.assessment_sittings as s
+        left join {RAW}.pupils as p on s.pupil_id = p.pupil_id
+
+        union all
+
+        select
+            'responses.session_id -> assessment_sittings',
+            count(*),
+            countif(s.session_id is null)
+        from {RAW}.responses as r
+        left join {RAW}.assessment_sittings as s on r.session_id = s.session_id
+
+        union all
+
+        select
+            'responses.pupil_id -> pupils',
+            count(*),
+            countif(p.pupil_id is null)
+        from {RAW}.responses as r
+        left join {RAW}.pupils as p on r.pupil_id = p.pupil_id
+
+        union all
+
+        select
+            'responses.question_id -> course_hierarchy',
+            count(*),
+            countif(ch.question_id is null)
+        from {RAW}.responses as r
+        left join {RAW}.course_hierarchy as ch on r.question_id = ch.question_id
+
+        union all
+
+        select
+            'responses.pupil_id = sitting.pupil_id',
+            count(*),
+            countif(r.pupil_id != s.pupil_id)
+        from {RAW}.responses as r
+        inner join {RAW}.assessment_sittings as s on r.session_id = s.session_id
+    )
+
+    select * from relationships
+    """)
+    return
+
+
+@app.cell
+def _(RAW, q):
+    # Cardinality: how many children each parent has.
+    q(f"""
+    with sittings_per_pupil as (
+        select p.pupil_id, count(s.session_id) as n
+        from {RAW}.pupils as p
+        left join {RAW}.assessment_sittings as s on p.pupil_id = s.pupil_id
+        group by p.pupil_id
+    ),
+
+    responses_per_sitting as (
+        select s.session_id, count(r.response_id) as n
+        from {RAW}.assessment_sittings as s
+        left join {RAW}.responses as r on s.session_id = r.session_id
+        group by s.session_id
+    ),
+
+    responses_per_question as (
+        select ch.question_id, count(r.response_id) as n
+        from {RAW}.course_hierarchy as ch
+        left join {RAW}.responses as r on ch.question_id = r.question_id
+        group by ch.question_id
+    ),
+
+    subjects_per_sitting as (
+        select r.session_id, count(distinct ch.subject_id) as n
+        from {RAW}.responses as r
+        inner join {RAW}.course_hierarchy as ch on r.question_id = ch.question_id
+        group by r.session_id
+    )
+
+    select
+        'sittings per pupil' as measure,
+        countif(n = 0) as parents_with_none,
+        min(n) as min_n,
+        approx_quantiles(n, 2)[offset(1)] as median_n,
+        max(n) as max_n
+    from sittings_per_pupil
+    union all
+    select 'responses per sitting', countif(n = 0), min(n), approx_quantiles(n, 2)[offset(1)], max(n)
+    from responses_per_sitting
+    union all
+    select 'responses per question', countif(n = 0), min(n), approx_quantiles(n, 2)[offset(1)], max(n)
+    from responses_per_question
+    union all
+    select 'subjects per sitting', countif(n = 0), min(n), approx_quantiles(n, 2)[offset(1)], max(n)
+    from subjects_per_sitting
+    """)
+    return
 
 
 @app.cell
