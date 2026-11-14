@@ -6,3 +6,4 @@ logs/
 .user.yml
 .claude/settings.local.json
 __marimo__/
+.gcp_token
