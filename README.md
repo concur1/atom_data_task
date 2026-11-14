@@ -53,7 +53,8 @@ Evidence for each is in [`notebooks/01_exploration.py`](notebooks/01_exploration
 - **`responses.session_type`** is always `MOCK_TEST` and never matches the
   sitting's `session_type`.
 - **Late answers:** 1,608 responses have `answered_at` after the sitting's
-  `finished_at`; 31 sittings have no `finished_at`.
+  `finished_at`, but by at most 1 second (timestamp rounding). Only
+  incomplete sittings lack a `finished_at`.
 - **Soft deletes:** no pupil or sitting is currently marked `is_deleted`.
 - **Year groups:** 25 sittings (entrance exams) are in years 11, 14 and 15.
 - **Unused rows:** 61 pupils have no sittings, 79 sittings have no responses,
@@ -63,11 +64,11 @@ Evidence for each is in [`notebooks/01_exploration.py`](notebooks/01_exploration
 
 Scoring follows the KS2 rules in the GOV.UK guidance where they apply.
 
-- **Subjects:** KS2 awards scaled scores only for reading, GPS and maths.
-  Maths is scored with the KS2 maths table and English with the KS2 reading
-  table (Atom's English topics aren't labelled reading vs GPS). Science,
-  Verbal/Non-Verbal Reasoning, Screeners and Wellbeing have no KS2 scaled-score
-  equivalent and are not scored, rather than given a misleading proxy.
+- **Subjects and conversion:** _under review_ - every subject is to be scored
+  ("best effort", as the brief asks). Options and evidence are in
+  [`notebooks/02_conversion_curves.py`](notebooks/02_conversion_curves.py):
+  real KS2 tables for Maths/English plus a generic curve or a formula derived
+  from STA's published scaling equation for the other subjects.
 - **Qualifying sittings:** complete, not deleted, not a survey and not an
   adaptive mock (adaptive difficulty makes % correct incomparable), year group
   1-6. KS2 precedent: a pupil must sit every paper to receive a score.
@@ -77,7 +78,7 @@ Scoring follows the KS2 rules in the GOV.UK guidance where they apply.
   per (sitting, question), correct only if every copy is correct. Mean %
   correct moves by under 2 points under "any copy correct" instead.
 - **No-attempts** count as wrong (0 marks), as an unanswered KS2 question does.
-- **Late answers** are kept (likely sync lag).
+- **Late answers** are kept (they are at most 1 second late).
 - **Unit of scoring:** each qualifying sitting is scored on its own (KS2 never
   pools attempts). A pupil's score as of time T is their latest scored sitting
   finished at or before T.
