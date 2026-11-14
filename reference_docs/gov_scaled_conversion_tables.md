@@ -5,11 +5,11 @@ Understanding scaled scores at key stage 2
 Information for schools and local authorities about scaled scores and the expected standard for the key stage 2 national curriculum tests.
 
 From:
-    Standards and Testing Agency 
+    Standards and Testing Agency
 Published:
     9 July 2019
 Last updated:
-    6 July 2026 — See all updates 
+    6 July 2026 — See all updates
 
 Get emails about this page
 Print this page
@@ -88,4 +88,3 @@ If you have further questions about national curriculum tests, you can:
 
     email assessments@education.gov.uk
     call the national curriculum assessments helpline on 0300 303 3013
-

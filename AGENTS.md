@@ -1,54 +1,39 @@
-
 # Agent instructions
 
 ## Tooling
 
-- Use `uv` for everything Python: dependencies, virtualenvs, and running code/tests. Never call bare `python`/`pip`.
-- Lint and format with `ruff`.
-- Type-check with `ty`.
+- Use `uv` for everything Python: dependencies, virtualenvs, and running tools. Never call bare `python`/`pip`.
+- dbt Core on BigQuery (`dbt-bigquery`), run via `uv run dbt ...`.
+- Python (marimo notebooks): lint/format with `ruff`, type-check with `ty`.
+- SQL: lint/fix with `sqruff` (BigQuery dialect, jinja templater; config in `.sqruff`).
+- Checks are defined once in `.pre-commit-config.yaml` (pre-push stage). They also run in GitHub Actions (without `dbt-build`, which needs BigQuery) and from the Claude Code pre-push hook in `.claude/`.
 
 ## Commands
 
-### Dependencies
-- Add a dependency: `uv add <pkg>`
-- Add a dev dependency: `uv add --dev <pkg>`
-
-### Run code
-- Run a script/module: `uv run python -m <module>`
-- Run a file: `uv run main.py`
-
-### Check suite
-- Lint: `uv run ruff check .`
-- Format: `uv run ruff format .`
-- Type-check: `uv run ty check`
-- Test: `uv run pytest`
+- Setup: `make setup`
+- Build models, seeds and tests: `make build`
+- All checks: `make check`
+- Add a dependency: `uv add <pkg>` / `uv add --dev <pkg>`
 
 ## Working rules
 
 ### General
-- At the end of **every** task, run the full check suite and make it pass:
-  `uv run ruff format . && uv run ruff check . && uv run ty check && uv run pytest`
-- Prefer pure functions that can be easily tested.
+- At the end of **every** task, run `make check` (includes `dbt build`) and make it pass.
+- Work in thin stacked PRs: one branch per task, each branched off the previous task's branch (`01-...`, `02-...`).
+
+### dbt / BigQuery
+- Medallion layers: `models/bronze/` (sources on `de_raw` plus their tests), `models/silver/` (cleaned, conformed), `models/gold/` (outputs).
+- All models build into one dataset (`owen_cain` by default), so prefix model names with their layer: `<layer>__<entity>`, e.g. `silver__responses`.
+- Ask the user before adding a new table/model and deciding which layer it lives in.
+- Write down every interpretation of ambiguous data (in the README's assumptions section).
 
 ### Testing
-- Test behaviour not implementation.
-- Before creating tests confirm with the user what behaviour we should enforce.
-- Always add specific type hints/strong typing.
+- Test behaviour, not implementation.
+- Before creating tests, confirm with the user what behaviour we should enforce.
 
-### Tooling
-- Prefer Polars over Pandas when using dataframes.
-- Prefer Lazyframes over DataFrames when using Polars.
-- Use Pydantic in **strict mode** for all validation (`model_config = ConfigDict(strict=True, extra="forbid")`) so types are never silently coerced and unknown fields are rejected.
+### Reconciliation
 
-### Data Pipeline Logic
-- Validate JSON at the decode boundary: guard the raw parse (catch malformed/truncated JSON) before Pydantic sees it, then use Pydantic per record. Do deduplication and gap-finding in Polars, not Pydantic. 
-- When building ingestion data pipelines include "metadata" about the ingested record (which should be a struct), this should include the ingestion time, the source file/api, pipeline version (optional).
-- Output schema: one source of truth. Columns and order come from `Model.model_fields`; one `{field_name: pl.DataType}` map gives the Polars types (metadata columns included).
-- Once a data pipeline has been created, add the command to run it to the makefile.
-
-### Reconciliaiton
-
-Verify that a pipeline is working as expected by creating a reconciliaiton notebook in the notebooks/ folder.
+Verify that a pipeline is working as expected by creating a reconciliation notebook in the `notebooks/` folder.
 Reconciliation notebooks should:
 - Run the pipeline
 - Run checks such as:
@@ -57,6 +42,3 @@ Reconciliation notebooks should:
     - Check for nulls
     - Count the rows
     - Check for gaps in the input data
-
-
-
