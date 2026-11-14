@@ -1,0 +1,136 @@
+# Bronze layer: the raw mock pupil-activity tables as landed in `de_raw`.
+# We do not own these tables, so we declare them as sources and test them here.
+# Tests are `warn` on purpose: they surface data-quality issues in the build log
+# without blocking the pipeline. Silver models decide how to handle them.
+version: 2
+
+sources:
+  - name: de_raw
+    description: Mock Atom Learning pupil activity data (read-only, owned upstream).
+    database: atom-analytics-candidates
+    schema: de_raw
+    config:
+      loaded_at_field: null
+    tables:
+      - name: pupils
+        description: One row per pupil.
+        columns:
+          - name: pupil_id
+            description: Pupil identifier.
+            data_tests:
+              - unique:
+                  config: {severity: warn}
+              - not_null:
+                  config: {severity: warn}
+          - name: is_deleted
+            description: Soft-delete flag for the pupil.
+
+      - name: assessment_sittings
+        description: One row per assessment a pupil sat.
+        columns:
+          - name: session_id
+            description: Sitting identifier.
+            data_tests:
+              - unique:
+                  config: {severity: warn}
+              - not_null:
+                  config: {severity: warn}
+          - name: pupil_id
+            description: Pupil who sat the assessment.
+            data_tests:
+              - not_null:
+                  config: {severity: warn}
+              - relationships:
+                  arguments:
+                    to: source('de_raw', 'pupils')
+                    field: pupil_id
+                  config: {severity: warn}
+          - name: assessment_id
+            description: Assessment that was sat.
+          - name: session_type
+            description: Type of session.
+          - name: style
+            description: Style of the assessment.
+          - name: year_group_at_sitting
+            description: Pupil's school year group when they sat the assessment.
+          - name: total_questions
+            description: Number of questions in the assessment.
+          - name: is_complete
+            description: Whether the pupil completed the sitting.
+          - name: is_deleted
+            description: Soft-delete flag for the sitting.
+          - name: started_at
+            description: When the sitting started.
+          - name: finished_at
+            description: When the sitting finished.
+
+      - name: responses
+        description: One row per question a pupil answered.
+        columns:
+          - name: response_id
+            description: Response identifier.
+            data_tests:
+              - unique:
+                  config: {severity: warn}
+              - not_null:
+                  config: {severity: warn}
+          - name: pupil_id
+            description: Pupil who answered.
+            data_tests:
+              - not_null:
+                  config: {severity: warn}
+          - name: session_id
+            description: Sitting the response belongs to.
+            data_tests:
+              - not_null:
+                  config: {severity: warn}
+              - relationships:
+                  arguments:
+                    to: source('de_raw', 'assessment_sittings')
+                    field: session_id
+                  config: {severity: warn}
+          - name: session_type
+            description: Type of session (denormalised from the sitting).
+          - name: question_id
+            description: Question answered.
+            data_tests:
+              - not_null:
+                  config: {severity: warn}
+              - relationships:
+                  arguments:
+                    to: source('de_raw', 'course_hierarchy')
+                    field: question_id
+                  config: {severity: warn}
+          - name: is_correct
+            description: Whether the answer was correct.
+          - name: is_no_attempt
+            description: Whether the pupil skipped the question.
+          - name: seconds_taken
+            description: Time spent on the question, in seconds.
+          - name: question_number
+            description: Position of the question within the sitting.
+          - name: answered_at
+            description: When the response was recorded.
+
+      - name: course_hierarchy
+        description: >
+          One row per question, placing it in the subject hierarchy
+          (question -> atom -> subtopic -> topic -> subject).
+        columns:
+          - name: question_id
+            description: Question identifier.
+            data_tests:
+              - unique:
+                  config: {severity: warn}
+              - not_null:
+                  config: {severity: warn}
+          - name: atom_id
+            description: Atom (smallest curriculum unit) the question belongs to.
+          - name: subtopic_id
+            description: Subtopic identifier.
+          - name: topic_id
+            description: Topic identifier.
+          - name: subject_id
+            description: Subject identifier.
+          - name: subject_name
+            description: Subject display name.

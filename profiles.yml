@@ -1,0 +1,28 @@
+# Committed on purpose: holds no secrets, only env_var references.
+# Pick a target with DBT_TARGET (defaults to `dev`).
+#   dev     - your own gcloud credentials (`gcloud auth application-default login`)
+#   sandbox - a raw OAuth access token in CLOUDSDK_AUTH_ACCESS_TOKEN
+atom_sats:
+  target: "{{ env_var('DBT_TARGET', 'dev') }}"
+  outputs:
+    dev:
+      type: bigquery
+      method: oauth
+      project: "{{ env_var('DBT_GCP_PROJECT', 'atom-analytics-candidates') }}"
+      dataset: "{{ env_var('DBT_DATASET', 'owen_cain') }}"
+      location: europe-west2
+      threads: 4
+      priority: interactive
+      job_execution_timeout_seconds: 300
+      job_retries: 1
+    sandbox:
+      type: bigquery
+      method: oauth-secrets
+      token: "{{ env_var('CLOUDSDK_AUTH_ACCESS_TOKEN', '') }}"
+      project: "{{ env_var('DBT_GCP_PROJECT', 'atom-analytics-candidates') }}"
+      dataset: "{{ env_var('DBT_DATASET', 'owen_cain') }}"
+      location: europe-west2
+      threads: 4
+      priority: interactive
+      job_execution_timeout_seconds: 300
+      job_retries: 1

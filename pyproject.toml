@@ -1,0 +1,20 @@
+[project]
+name = "atom-sats"
+version = "0.1.0"
+description = "dbt models that score pupils on the KS2 SATs 80-120 scaled-score scale."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "dbt-bigquery~=1.12.0",
+    "dbt-core~=1.12.0",
+]
+
+[dependency-groups]
+dev = [
+    "marimo>=0.25.2",
+    "pre-commit>=4.7.0",
+    "regex>=2026.11.9",
+    "ruff>=0.17.5",
+    "sqruff>=0.44.0",
+    "ty>=0.0.104",
+]

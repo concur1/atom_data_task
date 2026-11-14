@@ -1,0 +1,58 @@
+# Single source of truth for repo checks. Runs at the pre-push stage (not on
+# every commit), in GitHub Actions, and from the Claude Code pre-push hook.
+# Tool versions for local hooks come from uv.lock via `uv run`.
+default_install_hook_types: [pre-push]
+default_stages: [pre-push]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types: [python]
+      - id: ty
+        name: ty check
+        entry: uv run ty check
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: sqruff-fix
+        name: sqruff fix
+        entry: uv run sqruff fix
+        language: system
+        files: ^(models|macros|tests|analyses)/.*\.sql$
+      - id: sqruff-lint
+        name: sqruff lint
+        entry: uv run sqruff lint
+        language: system
+        files: ^(models|macros|tests|analyses)/.*\.sql$
+      - id: dbt-parse
+        name: dbt parse
+        entry: bash -c 'uv run dbt deps --quiet && uv run dbt parse --quiet'
+        language: system
+        files: ^(models|macros|seeds|tests|analyses)/|^(dbt_project|packages|profiles)\.yml$
+        pass_filenames: false
+      # Needs BigQuery credentials; CI sets SKIP=dbt-build.
+      - id: dbt-build
+        name: dbt build (models + seeds + tests)
+        entry: uv run dbt build
+        language: system
+        files: ^(models|macros|seeds|tests|analyses)/|^(dbt_project|packages|profiles)\.yml$
+        pass_filenames: false

@@ -1,0 +1,24 @@
+name: atom_sats
+version: "0.1.0"
+config-version: 2
+profile: atom_sats
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+analysis-paths: ["analyses"]
+
+clean-targets:
+  - target
+  - dbt_packages
+
+# Every model lands in the single dataset we can write to (see
+# macros/generate_schema_name.sql). Layers are separated by folder and by the
+# `<layer>__<entity>` model-name prefix rather than by dataset.
+models:
+  atom_sats:
+    silver:
+      +materialized: view
+    gold:
+      +materialized: table

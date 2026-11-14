@@ -1,0 +1,7 @@
+[sqruff]
+dialect = bigquery
+templater = jinja
+rules = all
+
+[sqruff:templater:jinja]
+apply_dbt_builtins = True
