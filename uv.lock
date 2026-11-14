@@ -7,6 +7,9 @@ resolution-markers = [
     "sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
+[manifest]
+overrides = [{ name = "dbt-core-experimental-parser", marker = "sys_platform == 'never'" }]
+
 [[package]]
 name = "agate"
 version = "1.9.1"
@@ -348,7 +351,7 @@ dependencies = [
     { name = "daff" },
     { name = "dbt-adapters" },
     { name = "dbt-common" },
-    { name = "dbt-core-experimental-parser" },
+    { name = "dbt-core-experimental-parser", marker = "sys_platform == 'never'" },
     { name = "dbt-extractor" },
     { name = "dbt-protos" },
     { name = "jinja2" },

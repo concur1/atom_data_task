@@ -18,3 +18,9 @@ dev = [
     "sqruff>=0.44.0",
     "ty>=0.0.104",
 ]
+
+[tool.uv]
+# dbt-core 1.12 requires this sdist, whose build downloads a ~175MB binary from
+# GitHub (fails behind TLS-intercepting proxies / without system CAs). It is
+# only used with `dbt --use-v2-parser`, which we don't use, so never install it.
+override-dependencies = ["dbt-core-experimental-parser; sys_platform == 'never'"]
