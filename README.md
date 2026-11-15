@@ -3,6 +3,10 @@
 dbt models that give every pupil a KS2 SATs-style scaled score (80–120) in every
 subject, based on their responses to Atom assessments. Built on BigQuery.
 
+> **Start here:** [PR #10](https://github.com/concur1/atom_data_task/pull/10)
+> creates the gold model (`gold__pupil_subject_scores`) and the notebook that
+> reconciles it against the official KS2 conversion tables.
+
 The brief is in [`reference_docs/take_home_task_content.md`](reference_docs/take_home_task_content.md);
 the GOV.UK scaled-score guidance is in [`reference_docs/gov_scaled_conversion_tables.md`](reference_docs/gov_scaled_conversion_tables.md).
 
