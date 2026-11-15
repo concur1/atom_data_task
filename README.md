@@ -10,6 +10,19 @@ subject, based on their responses to Atom assessments. Built on BigQuery.
 The brief is in [`reference_docs/take_home_task_content.md`](reference_docs/take_home_task_content.md);
 the GOV.UK scaled-score guidance is in [`reference_docs/gov_scaled_conversion_tables.md`](reference_docs/gov_scaled_conversion_tables.md).
 
+## Prerequisites
+
+- **[uv](https://docs.astral.sh/uv/getting-started/installation/)** manages
+  the Python environment and installs the right Python version (3.12) itself.
+  Other tools such as pip or Poetry aren't supported: the pinned versions live
+  in `uv.lock`, and `pyproject.toml` uses uv-specific settings
+  (`[tool.uv] override-dependencies`, which keeps a dbt dependency that fails
+  to build on some machines out of the install, and `[dependency-groups]` for
+  the dev tools).
+- **[gcloud CLI](https://cloud.google.com/sdk/docs/install)**, logged in with
+  access to the `atom-analytics-candidates` BigQuery project.
+- **make** and **git**.
+
 ## Quick start
 
 ```sh
