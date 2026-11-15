@@ -29,6 +29,11 @@ one), separated by folder and the `<layer>__<entity>` model-name prefix:
 | silver | `models/silver/` | Cleaned, conformed data. _TODO_ |
 | gold   | `models/gold/`   | The SATs score output. _TODO_ |
 
+## Design decisions
+
+The data model and point-in-time semantics are recorded in
+[`docs/adr/0001-scoring-data-model.md`](docs/adr/0001-scoring-data-model.md).
+
 ## What I built
 
 _TODO_
@@ -53,7 +58,8 @@ Evidence for each is in [`notebooks/01_exploration.py`](notebooks/01_exploration
 - **`responses.session_type`** is always `MOCK_TEST` and never matches the
   sitting's `session_type`.
 - **Late answers:** 1,608 responses have `answered_at` after the sitting's
-  `finished_at`; 31 sittings have no `finished_at`.
+  `finished_at`, but by at most 1 second (timestamp rounding). Only
+  incomplete sittings lack a `finished_at`.
 - **Soft deletes:** no pupil or sitting is currently marked `is_deleted`.
 - **Year groups:** 25 sittings (entrance exams) are in years 11, 14 and 15.
 - **Unused rows:** 61 pupils have no sittings, 79 sittings have no responses,
@@ -63,11 +69,21 @@ Evidence for each is in [`notebooks/01_exploration.py`](notebooks/01_exploration
 
 Scoring follows the KS2 rules in the GOV.UK guidance where they apply.
 
-- **Subjects:** KS2 awards scaled scores only for reading, GPS and maths.
-  Maths is scored with the KS2 maths table and English with the KS2 reading
-  table (Atom's English topics aren't labelled reading vs GPS). Science,
-  Verbal/Non-Verbal Reasoning, Screeners and Wellbeing have no KS2 scaled-score
-  equivalent and are not scored, rather than given a misleading proxy.
+- **Conversion to the 80-120 scale:** one KS2-shaped formula for every
+  subject, `least(120, greatest(80, floor(100 + 7.3 * ln(p / (1 - p)))))`,
+  where `p` is the proportion of questions correct; no score (`N`) if
+  `p < 0.05`. STA's documented scaling is linear in IRT ability, and
+  `logit(p)` approximates ability, so this reproduces the official 2024-2026
+  KS2 tables to ~1 point on average (fit and evidence in
+  [`notebooks/02_conversion_curves.py`](notebooks/02_conversion_curves.py)).
+  The real tables aren't applied directly because an Atom assessment isn't
+  the KS2 paper they were calibrated on.
+- **Assumes** an Atom assessment is about as hard as a KS2 paper and one
+  question is worth one mark. With more data, question difficulty could be
+  estimated from Atom responses to adjust for this.
+- **Subjects:** every subject with qualifying sittings is scored (English,
+  Maths, Screeners, Verbal and Non-Verbal Reasoning). Science has questions
+  but no sittings; Wellbeing sittings are all surveys (no right answers).
 - **Qualifying sittings:** complete, not deleted, not a survey and not an
   adaptive mock (adaptive difficulty makes % correct incomparable), year group
   1-6. KS2 precedent: a pupil must sit every paper to receive a score.
@@ -77,7 +93,7 @@ Scoring follows the KS2 rules in the GOV.UK guidance where they apply.
   per (sitting, question), correct only if every copy is correct. Mean %
   correct moves by under 2 points under "any copy correct" instead.
 - **No-attempts** count as wrong (0 marks), as an unanswered KS2 question does.
-- **Late answers** are kept (likely sync lag).
+- **Late answers** are kept (they are at most 1 second late).
 - **Unit of scoring:** each qualifying sitting is scored on its own (KS2 never
   pools attempts). A pupil's score as of time T is their latest scored sitting
   finished at or before T.

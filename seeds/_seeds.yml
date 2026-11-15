@@ -1,0 +1,28 @@
+version: 2
+
+seeds:
+  - name: ks2_scaled_score_conversion
+    description: >
+      Official KS2 raw-score to scaled-score conversion tables published by the
+      Standards and Testing Agency, one row per test year, subject and raw score
+      (0 to the subject's maximum). Parsed from the GOV.UK HTML tables:
+      https://www.gov.uk/government/publications/key-stage-2-tests-2024-scaled-scores/2024-key-stage-2-scaled-score-conversion-tables
+      https://www.gov.uk/government/publications/key-stage-2-tests-2025-scaled-scores/2025-key-stage-2-scaled-score-conversion-tables
+      https://www.gov.uk/government/publications/key-stage-2-tests-2026-scaled-scores/2026-key-stage-2-scaled-score-conversion-tables
+    config:
+      column_types:
+        test_year: int64
+        ks2_subject: string
+        raw_score: int64
+        scaled_score: int64
+    columns:
+      - name: test_year
+        description: Calendar year of the KS2 test (tests are sat in May).
+      - name: ks2_subject
+        description: "`reading` (max 50), `maths` (max 110) or `gps` (grammar, punctuation & spelling, max 70)."
+      - name: raw_score
+        description: Total raw marks across all papers in the subject.
+      - name: scaled_score
+        description: >
+          Scaled score 80-120. Null where GOV.UK gives "No scaled score" (raw
+          score below the minimum needed for 80).
