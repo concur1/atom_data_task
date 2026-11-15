@@ -278,5 +278,88 @@ def _(gold, our_score, pl):
     return
 
 
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 5. Distribution of the final scores
+
+    How the scores in gold are spread across the 80-120 scale (every scored
+    sitting, and each pupil's current score). Because the scale is linear in
+    % correct, the spread of scores is simply 40 × the spread of % correct.
+    """)
+    return
+
+
+@app.cell
+def _(alt, gold, mo, pl):
+    _scored = gold.filter(pl.col("has_scaled_score"))
+    _by_subject = (
+        _scored.group_by("subject_name")
+        .agg(
+            sittings=pl.len(),
+            mean=pl.col("scaled_score").mean().round(1),
+            sd=pl.col("scaled_score").std().round(1),
+            p5=pl.col("scaled_score").quantile(0.05, "nearest"),
+            p25=pl.col("scaled_score").quantile(0.25, "nearest"),
+            median=pl.col("scaled_score").median(),
+            p75=pl.col("scaled_score").quantile(0.75, "nearest"),
+            p95=pl.col("scaled_score").quantile(0.95, "nearest"),
+            pct_95_to_109=(
+                100 * pl.col("scaled_score").is_between(95, 109).mean()
+            ).round(1),
+            pct_meeting_expected=(100 * pl.col("meets_expected_standard").mean()).round(
+                1
+            ),
+            pct_at_80_or_120=(
+                100 * pl.col("scaled_score").is_in([80, 120]).mean()
+            ).round(1),
+        )
+        .sort("sittings", descending=True)
+    )
+    _hist = (
+        alt.Chart(
+            pl.concat(
+                [
+                    _scored.select("scaled_score", view=pl.lit("every scored sitting")),
+                    _scored.filter(pl.col("is_current")).select(
+                        "scaled_score",
+                        view=pl.lit("current score per pupil and subject"),
+                    ),
+                ]
+            )
+        )
+        .mark_bar()
+        .encode(
+            x=alt.X(
+                "scaled_score:Q",
+                bin=alt.Bin(extent=[80, 122], step=2),
+                title="Scaled score",
+            ),
+            y=alt.Y("count():Q", title="Count"),
+            row=alt.Row("view:N", title=None),
+        )
+        .properties(width=680, height=160)
+        .resolve_scale(y="independent")
+    )
+    mo.vstack([_by_subject, mo.ui.altair_chart(_hist)])
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    **Findings:** scores bunch in the middle of the scale. Across all scored
+    sittings the middle half sits between about 96 and 108, around two thirds
+    of scores fall in 95-109, and very few reach 80 or 120. The scale's tails
+    are barely used, which makes it hard to tell apart pupils in the middle.
+    (The comb-like spikes come from common sitting lengths: with 25
+    questions, for example, scores move in steps of 1.6 points, so some
+    integer scores occur more often than their neighbours.)
+    Finding a curve that spreads scores out more is listed under "What I would
+    do next" in the README.
+    """)
+    return
+
+
 if __name__ == "__main__":
     app.run()

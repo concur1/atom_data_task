@@ -143,6 +143,16 @@ Scoring follows the KS2 rules in the GOV.UK guidance where they apply.
 
 ## What I would do next
 
+- **A curve that spreads scores out more.** Under the linear formula, scores
+  bunch in the middle: across all scored sittings the middle half is about
+  96-108, and around two thirds fall in 95-109, so the ends of the 80-120
+  scale are barely used (see section 5 of `notebooks/03_reconciliation.py`).
+  Options: a steeper curve through the middle (the logit in ADR 0002 is
+  *flatter* there, so it would bunch scores further), or calibrating to the
+  national KS2 scaled-score distribution, i.e. mapping each pupil's
+  percentile among Atom pupils of the same year group to the national score
+  at that percentile. Either would need a new `scoring_method`.
+
 - **Partition `de_raw.responses` by `date(answered_at)`** (upstream). The daily
   batches of `silver__answers` filter on it, but today each batch still scans
   the whole raw table.
