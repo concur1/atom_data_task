@@ -33,24 +33,28 @@ T**. It is the pupil's actual score at T, not "what the warehouse believed at T"
 ### Lineage
 
 ```
-source de_raw ─┬─ silver__sittings        one row per sitting: scoring rules as flags
-               ├─ silver__answers         one row per (sitting, question): duplicates collapsed
-               └─ silver__sitting_scores  one row per scorable sitting: questions, correct, p, scaled score
-                            └─ gold__<name tbd>  type-2 history per pupil × subject
+source de_raw ─┬─ silver__sittings        one row per sitting: scoring rules as flags           (table)
+               └─ silver__answers         one row per (sitting, question), duplicates collapsed (incremental)
+                    └─ silver__sitting_scores  one row per (sitting, subject): scaled score       (incremental)
+                            └─ gold__pupil_subject_scores  type-2 history per pupil × subject    (table)
 ```
 
 - **`silver__sittings`** keeps every sitting, with `is_scorable` and an
-  `exclusion_reason`: `incomplete`, `deleted`, `survey`, `adaptive`,
-  `year_group_above_6` or `no_responses`. Sittings of deleted pupils are dropped
+  `exclusion_reason`: `deleted`, `incomplete`, `survey`, `adaptive` or
+  `year_group_above_6`. Sittings of deleted pupils are dropped
   here, so a deleted pupil disappears from everything downstream, history
   included.
 - **`silver__answers`** collapses duplicate responses to one answer per
   (sitting, question). The answer counts as correct only if every copy is
-  correct. Responses without a sitting are dropped.
-- **`silver__sitting_scores`** computes `p = correct / questions` and the scaled
-  score via one macro, `ks2_scaled_score(correct, questions)`:
-  `floor(80 + 40p)`, or no score (`N`) below 5% correct.
-  Why this formula and these constants: [ADR 0002](0002-scaled-score-curve.md).
+  correct. No sitting or pupil rules are applied here; responses without a
+  sitting simply never reach gold.
+- **`silver__sitting_scores`** computes, per (sitting, subject),
+  `p = correct / questions` and the scaled score via one macro,
+  `ks2_scaled_score(correct, questions)`: `floor(80 + 40p)`, or no score (`N`)
+  below 5% correct. Why this formula: [ADR 0002](0002-scaled-score-curve.md).
+  It applies no sitting or pupil rules either.
+- **`gold__pupil_subject_scores`** joins the scores to scorable sittings (which
+  also drops deleted pupils) and builds the history.
 
 ### Gold: sparse type-2 history
 
@@ -61,7 +65,9 @@ One row per (pupil, subject, scored sitting):
 | surrogate key | hash of (`pupil_id`, `subject_id`, `session_id`) |
 | `pupil_id`, `subject_id`, `subject_name`, `session_id` | natural key and labels |
 | `scaled_score`, `has_scaled_score` | `has_scaled_score` is false (and `scaled_score` null) when below the minimum (`N`) |
-| `questions`, `correct`, `p` | the evidence behind the score |
+| `questions`, `correct`, `proportion_correct` | the evidence behind the score |
+| `meets_expected_standard` | scaled score of 100 or more |
+| `assessment_id`, `year_group_at_sitting` | context for consumers (e.g. to caveat younger year groups) |
 | `valid_from` | this sitting's `finished_at` |
 | `valid_to` | the next scored sitting's `finished_at`, or null |
 | `is_current` | true on the pupil × subject's latest row |
@@ -84,16 +90,34 @@ One row per (pupil, subject, scored sitting):
 - Gold's history is **derived** from silver, never appended to. Rebuilding
   always gives the same table.
 
-### Scale (implemented in task 7)
+### Scale and incremental builds
 
-- `silver__answers`: incremental `merge` on (`session_id`, `question_id`),
-  partitioned by `date(answered_at)`, clustered by `session_id`, with a
-  3-day lookback for late rows.
-- `silver__sitting_scores`: partitioned by `date(finished_at)`, clustered by
-  `pupil_id`.
-- Gold: rebuilt only for the (pupil, subject) pairs touched by changed
-  sittings. Because history is derived, a deleted sitting's row disappears and
-  the previous row (if any) becomes current again.
+Only the large tables are incremental; everything small is rebuilt in full on
+every run, so changes to sittings and pupils (deletes, completions) can never
+go stale.
+
+| Model | Rows (at 100m responses) | Build |
+|---|---|---|
+| `silver__answers` | ~100m | **microbatch** on `answered_at`, one batch per day, reprocessing the last `answers_lookback_days` (3) days and replacing them whole; partitioned by day, clustered by `session_id` |
+| `silver__sitting_scores` | ~4m | **incremental merge** on (`session_id`, `subject_id`): re-scores every sitting with an answer inside the lookback, from all of that sitting's answers |
+| `silver__sittings` | ~4m | table, rebuilt every run |
+| `gold__pupil_subject_scores` | ~4m | table, rebuilt every run (cheap), so the history, `valid_to` and deletes are always consistent |
+
+- **Idempotent:** batches replace whole days, the merge replaces whole
+  sittings, and the tables are rebuilt; re-running gives the same result.
+- **Late changes:** the raw tables have no updated-at timestamps, so a
+  response changed more than `answers_lookback_days` after it was answered is
+  only picked up by `dbt build --full-refresh`, which should run on a schedule
+  (e.g. weekly) as a backstop. A sitting or pupil change is picked up on the
+  next normal run.
+- **Raw table partitioning:** each daily batch filters `de_raw.responses` on
+  `answered_at`, but that table isn't partitioned, so today every batch scans
+  all of it. At 100m+ rows, `de_raw.responses` should be partitioned by
+  `date(answered_at)` upstream for the batches to read only their day.
+- Measured on the sample: a normal run reprocesses 4 daily batches (about 17
+  seconds); a full refresh rebuilds about 380 days of batches (about 5
+  minutes). Running twice gives identical tables, and an incremental build
+  gives exactly the same tables as a full refresh.
 
 ### Reference data
 

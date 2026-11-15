@@ -4,10 +4,29 @@
 
     Score as of T: valid_from <= T and (valid_to > T or valid_to is null).
     Current score:  is_current.
+
+    Rebuilt in full on every run from the incremental silver models, applying
+    the sitting rules (is_scorable) and dropping deleted pupils, so deletes and
+    rule changes always take effect and valid_to is always consistent.
 #}
 
 with sitting_scores as (
     select * from {{ ref('silver__sitting_scores') }}
+),
+
+sittings as (
+    select * from {{ ref('silver__sittings') }}
+    where is_scorable
+),
+
+scored_sittings as (
+    select
+        sitting_scores.*,
+        sittings.assessment_id,
+        sittings.year_group_at_sitting,
+        sittings.finished_at
+    from sitting_scores
+    inner join sittings on sitting_scores.session_id = sittings.session_id
 ),
 
 versioned as (
@@ -21,7 +40,7 @@ versioned as (
             partition by pupil_id, subject_id
             order by finished_at desc, session_id desc
         ) = 1 as is_latest
-    from sitting_scores
+    from scored_sittings
 )
 
 select

@@ -19,7 +19,7 @@ clean-targets:
 models:
   atom_sats:
     silver:
-      +materialized: view
+      +materialized: table  # silver__answers / silver__sitting_scores are incremental
     gold:
       +materialized: table
 
@@ -27,4 +27,9 @@ vars:
   # Linear rescaling onto the KS2 scale (docs/adr/0002-scaled-score-curve.md):
   # scaled = floor(80 + 40 * correct / questions); no score below min_pct.
   ks2_min_pct: 5
+  # Incremental silver models (docs/adr/0001-scoring-data-model.md):
+  # silver__answers reprocesses this many days on every run; changes older
+  # than that need `dbt build --full-refresh`.
+  answers_lookback_days: 3
+  answers_begin: "2025-11-01"  # first day of response data
   scoring_method: linear_v1

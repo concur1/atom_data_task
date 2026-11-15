@@ -129,9 +129,27 @@ Scoring follows the KS2 rules in the GOV.UK guidance where they apply.
 - **Below the minimum raw score** a pupil gets no scaled score (`N`, outcome
   `NS`), as in the GOV.UK guidance; we don't round them up to 80.
 
+## Running it
+
+- `make build` runs `dbt build`: models, seeds, data tests and unit tests.
+  `silver__answers` and `silver__sitting_scores` are incremental, so a normal
+  run only reprocesses the last `answers_lookback_days` (3) days of answers.
+- **Schedule a full refresh** (`dbt build --full-refresh`, e.g. weekly). The
+  raw tables have no updated-at timestamps, so a response changed after the
+  lookback window is only picked up by a full refresh. Changes to sittings and
+  pupils (deletes, completions) are picked up by every normal run.
+- To rebuild a date range of answers: `dbt build --select silver__answers+
+  --event-time-start 2026-01-01 --event-time-end 2026-02-01`.
+
 ## What I would do next
 
-_TODO_
+- **Partition `de_raw.responses` by `date(answered_at)`** (upstream). The daily
+  batches of `silver__answers` filter on it, but today each batch still scans
+  the whole raw table.
+
+- **Model contracts:** enforce the schema of each model (column names, data
+  types, `not_null` / primary-key constraints) with dbt model contracts, so a
+  type change fails the build instead of reaching the application database.
 
 ## AI usage
 
