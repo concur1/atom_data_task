@@ -283,8 +283,8 @@ def _(mo):
     mo.md(r"""
     ## 5. Distribution of the final scores
 
-    How the scores in gold are spread across the 80-120 scale (every scored
-    sitting, and each pupil's current score). Because the scale is linear in
+    How the scores in gold (every scored sitting) are spread across the
+    80-120 scale. Because the scale is linear in
     % correct, the spread of scores is simply 40 × the spread of % correct.
     """)
     return
@@ -317,17 +317,7 @@ def _(alt, gold, mo, pl):
         .sort("sittings", descending=True)
     )
     _hist = (
-        alt.Chart(
-            pl.concat(
-                [
-                    _scored.select("scaled_score", view=pl.lit("every scored sitting")),
-                    _scored.filter(pl.col("is_current")).select(
-                        "scaled_score",
-                        view=pl.lit("current score per pupil and subject"),
-                    ),
-                ]
-            )
-        )
+        alt.Chart(_scored)
         .mark_bar()
         .encode(
             x=alt.X(
@@ -335,11 +325,9 @@ def _(alt, gold, mo, pl):
                 bin=alt.Bin(extent=[80, 122], step=2),
                 title="Scaled score",
             ),
-            y=alt.Y("count():Q", title="Count"),
-            row=alt.Row("view:N", title=None),
+            y=alt.Y("count():Q", title="Scored sittings"),
         )
-        .properties(width=680, height=160)
-        .resolve_scale(y="independent")
+        .properties(width=680, height=260, title="Distribution of scaled scores")
     )
     mo.vstack([_by_subject, mo.ui.altair_chart(_hist)])
     return
