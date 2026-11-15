@@ -323,8 +323,10 @@ def _(mo):
     spelling (GPS)** and **maths**. Science is teacher-assessed only; verbal /
     non-verbal reasoning are not national-curriculum subjects.
 
-    **Decision:** score Maths (KS2 maths table) and English (KS2 reading table).
-    Other subjects get no score rather than a made-up proxy.
+    **Decision:** score every subject that has qualifying sittings, with one
+    KS2-style formula for all of them, since an Atom assessment isn't a KS2
+    paper anyway (see `02_conversion_curves` and ADR 0002). Wellbeing drops
+    out because its sittings are all surveys.
     """)
     return
 
@@ -424,8 +426,8 @@ def _(mo):
       sitting's type, so it is ignored in favour of the sitting's.
     - Some responses reference a `session_id` with no sitting ("orphans"). We
       can't check completeness / type / year group for them, so they're excluded.
-    - Some responses are answered after the sitting's `finished_at`. Kept
-      (likely sync lag) but worth flagging.
+    - Some responses are answered after the sitting's `finished_at`, but by at
+      most 1 second (timestamp rounding), so they're kept.
     """)
     return
 
@@ -641,11 +643,9 @@ def _(RAW, q):
             coalesce(not s.is_deleted, false) as not_deleted,
             coalesce(s.is_complete, false) as is_complete,
             coalesce(s.style not in ('survey', 'adaptive'), false) as fixed_form,
-            coalesce(s.year_group_at_sitting <= 6, false) as primary_year,
-            ch.subject_name in ('English', 'Maths') as ks2_subject
+            coalesce(s.year_group_at_sitting <= 6, false) as primary_year
         from {RAW}.responses as r
         left join {RAW}.assessment_sittings as s on r.session_id = s.session_id
-        left join {RAW}.course_hierarchy as ch on r.question_id = ch.question_id
     ),
 
     steps as (
@@ -658,9 +658,6 @@ def _(RAW, q):
             where has_sitting and not_deleted and is_complete and fixed_form
         union all select 5, '+ year group <= 6', * from base
             where has_sitting and not_deleted and is_complete and fixed_form and primary_year
-        union all select 6, '+ English / Maths', * from base
-            where has_sitting and not_deleted and is_complete and fixed_form and primary_year
-            and ks2_subject
     )
 
     select
@@ -714,7 +711,6 @@ def _(RAW, q):
         from {RAW}.responses as r
         inner join qualifying_sittings as s on r.session_id = s.session_id
         inner join {RAW}.course_hierarchy as ch on r.question_id = ch.question_id
-        where ch.subject_name in ('English', 'Maths')
         group by r.session_id, r.question_id, ch.subject_name
     )
 
@@ -778,18 +774,6 @@ def _(pct, pl):
     pct.group_by("year_group", "subject_name").len().pivot(
         on="subject_name", index="year_group", values="len"
     ).sort("year_group").fill_null(0)
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""
-    ## 9. Next: conversion tables
-
-    Still to add in this task: GOV.UK raw → scaled conversion tables (reading
-    and maths) for the latest year plus two earlier years, to compare how much
-    the choice of year moves scores.
-    """)
     return
 
 

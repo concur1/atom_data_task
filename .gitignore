@@ -7,3 +7,4 @@ logs/
 .claude/settings.local.json
 __marimo__/
 .gcp_token
+.agent-pod.yaml

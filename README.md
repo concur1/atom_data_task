@@ -123,7 +123,7 @@ scored Atom sittings. Our line runs through the middle of the official curves:
 
 **The distribution could be more even.**
 
-![Distribution of scaled scores](reference_docs/scaled_scores_distributin.png)
+![Distribution of scaled scores](reference_docs/scaled_scores_distribution.png)
 
 Scores bunch in the middle of the scale: across all 2,287 scored sittings the
 mean is 102, the middle half is 96-108 and about two thirds fall in 95-109,
@@ -181,6 +181,10 @@ Scoring follows the KS2 rules in the GOV.UK guidance where they apply.
 - **Unit of scoring:** each qualifying sitting is scored on its own (KS2 never
   pools attempts). A pupil's score as of time T is their latest scored sitting
   finished at or before T.
+- **Missing questions:** 49 sittings have fewer answers than
+  `total_questions`. The proportion correct uses the answered questions only,
+  as if the missing ones weren't asked, because we can't tell a skipped
+  question from one that was never recorded.
 
 ### What I would do next
 

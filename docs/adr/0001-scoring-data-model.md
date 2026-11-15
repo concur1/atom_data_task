@@ -122,8 +122,8 @@ go stale.
 ### Reference data
 
 `seeds/ks2_scaled_score_conversion.csv` (official 2024-2026 KS2 tables) is
-**not** used for scoring. It is used by tests (the formula must stay close to
-the official tables) and documents what the formula is calibrated against.
+**not** used for scoring. The reconciliation notebook compares our scores
+with it, and it documents what the formula is checked against.
 
 ## Consequences
 

@@ -5,7 +5,7 @@ setup:  ## Install the Python env, dbt packages and the git pre-push hook
 	uv run dbt deps
 	uv run pre-commit install
 
-check:  ## Run every repo check (same as pre-push and CI, plus dbt build)
+check:  ## Run every repo check, including dbt build (the pre-push hook; CI skips dbt build)
 	uv run pre-commit run --all-files --hook-stage pre-push
 
 build:  ## Build models, seeds and tests in BigQuery

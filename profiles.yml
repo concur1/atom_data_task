@@ -1,7 +1,8 @@
 # Committed on purpose: holds no secrets, only env_var references.
 # Pick a target with DBT_TARGET (defaults to `dev`).
 #   dev     - your own gcloud credentials (`gcloud auth application-default login`)
-#   sandbox - a raw OAuth access token in CLOUDSDK_AUTH_ACCESS_TOKEN
+#   token   - a raw OAuth access token in CLOUDSDK_AUTH_ACCESS_TOKEN
+#             (e.g. from `gcloud auth print-access-token`)
 atom_sats:
   target: "{{ env_var('DBT_TARGET', 'dev') }}"
   outputs:
@@ -15,7 +16,7 @@ atom_sats:
       priority: interactive
       job_execution_timeout_seconds: 300
       job_retries: 1
-    sandbox:
+    token:
       type: bigquery
       method: oauth-secrets
       token: "{{ env_var('CLOUDSDK_AUTH_ACCESS_TOKEN', '') }}"
