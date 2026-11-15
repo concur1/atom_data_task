@@ -55,6 +55,45 @@ select * from owen_cain.gold__pupil_subject_scores
 where valid_from <= @t and (valid_to > @t or valid_to is null);
 ```
 
+## Results
+
+Both charts come from
+[`notebooks/03_reconciliation.py`](notebooks/03_reconciliation.py).
+
+### 1. Our scores are close to the official GOV.UK conversions
+
+![Our formula vs the KS2 conversion tables, 2024-2026](reference_docs/scaled_scores_vs_raw.png)
+
+The black line is our formula, `floor(80 + 40p)` (`p` = proportion of
+questions correct). The coloured lines are the official KS2 conversion tables
+published on GOV.UK for 2024-2026 (reading, maths, and grammar, punctuation and
+spelling), plotted against the % of marks available. The red dots are the
+scored Atom sittings.
+
+Our line runs through the middle of the official curves:
+
+- On average it is within about 1 point of the GPS and reading tables and
+  about 2 points of the maths tables (at most 5 points), similar to how much
+  the official tables differ from one year to the next.
+- It agrees with the official tables on whether a pupil met the expected
+  standard (100) for 94-100% of raw scores.
+- It is furthest from maths at the extremes, where the official maths curve is
+  steepest.
+
+### 2. The distribution could be more even
+
+![Distribution of scaled scores](reference_docs/scaled_scores_distributin.png)
+
+Scores bunch in the middle of the scale: across all 2,287 scored sittings the
+mean is 102, the middle half is 96-108 and about two thirds fall in 95-109,
+while the ends of the 80-120 range are barely used. That makes it hard to tell
+pupils in the middle apart. A curve that gives a more even spread of scores
+would improve this (see [What I would do next](#what-i-would-do-next)).
+
+The comb-like pattern comes from common sitting lengths: with 25 questions,
+for example, scores move in steps of 1.6 points, so some scores occur more
+often than their neighbours.
+
 ## How the pieces fit together
 
 ```
@@ -143,10 +182,10 @@ Scoring follows the KS2 rules in the GOV.UK guidance where they apply.
 
 ## What I would do next
 
-- **A curve that spreads scores out more.** Under the linear formula, scores
-  bunch in the middle: across all scored sittings the middle half is about
-  96-108, and around two thirds fall in 95-109, so the ends of the 80-120
-  scale are barely used (see section 5 of `notebooks/03_reconciliation.py`).
+- **A curve that spreads scores out more evenly.** Under the linear formula,
+  scores bunch in the middle: across all scored sittings the middle half is
+  about 96-108, and around two thirds fall in 95-109, so the ends of the 80-120
+  scale are barely used (see [Results](#2-the-distribution-could-be-more-even)).
   Options: a steeper curve through the middle (the logit in ADR 0002 is
   *flatter* there, so it would bunch scores further), or calibrating to the
   national KS2 scaled-score distribution, i.e. mapping each pupil's
