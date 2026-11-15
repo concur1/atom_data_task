@@ -156,12 +156,12 @@ an Atom assessment behaves like a KS2 paper at all.
 - Changing the formula changes every score, so it must come with a new
   `scoring_method` value.
 
-## Open
+## Missing questions
 
-- **Missing questions.** 49 sittings have fewer answers than
-  `total_questions`, with holes in `question_number`. $p$ currently uses
-  answered questions only; counting the missing ones as wrong would lower
-  those scores.
+49 sittings have fewer answers than `total_questions`, with holes in
+`question_number`. $p$ uses the **answered questions only** (missing questions
+are treated as not asked). Counting them as wrong would lower those scores,
+but we can't tell whether a question was skipped or simply never recorded.
 
 ## Not doing (yet)
 
