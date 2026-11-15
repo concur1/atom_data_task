@@ -94,6 +94,45 @@ The comb-like pattern comes from common sitting lengths: with 25 questions,
 for example, scores move in steps of 1.6 points, so some scores occur more
 often than their neighbours.
 
+## Robust table design
+
+How the models meet the brief's "built to last" requirements. Details are in
+[ADR 0001](docs/adr/0001-scoring-data-model.md).
+
+**Done**
+
+- **Re-runnable:** keys are hashes of natural keys (no random IDs or
+  timestamps), daily batches and sittings are replaced whole, and small tables
+  are rebuilt every run. Checked: running twice gives identical tables, and an
+  incremental build gives the same tables as a full refresh.
+- **Incremental for 100m+ responses:** `silver__answers` is built in daily
+  batches (dbt microbatch, 3-day lookback, partitioned by day, clustered by
+  sitting); `silver__sitting_scores` merges only sittings with new answers.
+  A normal run reprocesses 4 days.
+- **Point in time:** gold is a type-2 history (`valid_from` / `valid_to` /
+  `is_current`), so any pupil's score can be recomputed as it stood at time T.
+- **Deletes and corrections flow through:** sitting and pupil rules are
+  applied in gold, which is rebuilt every run, so a deleted sitting or pupil
+  disappears on the next run.
+- **Tested and documented:** every column has a description; data tests
+  (unique keys, 80-120 range, one current row, unbroken history) and unit
+  tests (de-duplication, formula edge cases, incremental logic, history) run
+  in every `dbt build`, including the pre-push hook.
+
+**Would do next**
+
+- **Model contracts:** enforce column names, data types and `not_null` /
+  primary-key constraints, so a schema change fails the build instead of
+  reaching the application database.
+- **Partition `de_raw.responses` by `date(answered_at)`** upstream, so each
+  daily batch reads only its own day.
+- **Schedule the weekly `--full-refresh`** (and normal runs) in an
+  orchestrator, as the backstop for late changes.
+- **Run `dbt build` in CI** against a dev dataset (needs workload identity
+  federation for BigQuery access).
+- **Export to the application database:** version the gold model and sync it
+  incrementally, using the surrogate key and `valid_from`.
+
 ## How the pieces fit together
 
 ```
