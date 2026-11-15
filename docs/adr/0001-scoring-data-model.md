@@ -48,9 +48,8 @@ source de_raw ─┬─ silver__sittings        one row per sitting: scoring rul
   (sitting, question). The answer counts as correct only if every copy is
   correct. Responses without a sitting are dropped.
 - **`silver__sitting_scores`** computes `p = correct / questions` and the scaled
-  score via one macro, `ks2_scaled_score(p)`:
-  `least(120, greatest(80, floor(100 + k * (ln(p / (1 - p)) - ln(p_cut / (1 - p_cut))))))`,
-  or no score (`N`) if `p < min_p`.
+  score via one macro, `ks2_scaled_score(correct, questions)`:
+  `floor(80 + 40p)`, or no score (`N`) below 5% correct.
   Why this formula and these constants: [ADR 0002](0002-scaled-score-curve.md).
 
 ### Gold: sparse type-2 history
@@ -61,12 +60,12 @@ One row per (pupil, subject, scored sitting):
 |---|---|
 | surrogate key | hash of (`pupil_id`, `subject_id`, `session_id`) |
 | `pupil_id`, `subject_id`, `subject_name`, `session_id` | natural key and labels |
-| `scaled_score`, `score_status` | null score with status `N` when below the minimum |
+| `scaled_score`, `has_scaled_score` | `has_scaled_score` is false (and `scaled_score` null) when below the minimum (`N`) |
 | `questions`, `correct`, `p` | the evidence behind the score |
 | `valid_from` | this sitting's `finished_at` |
 | `valid_to` | the next scored sitting's `finished_at`, or null |
 | `is_current` | true on the pupil × subject's latest row |
-| `scoring_method` | e.g. `ks2_logit_v1` |
+| `scoring_method` | e.g. `linear_v1` |
 
 - Score as of T: `valid_from <= T and (valid_to > T or valid_to is null)`.
 - Current score: `is_current`.
@@ -80,9 +79,8 @@ One row per (pupil, subject, scored sitting):
   sequences or random UUIDs. Natural-key columns are kept alongside.
 - Every window `order by` ends in a unique tie-break (e.g. `session_id`).
 - No `current_timestamp()` in business columns. It is allowed in metadata only.
-- Formula constants are dbt vars (`ks2_logit_slope: 7.3`,
-  `ks2_logit_p_cut: 0.5`, `ks2_min_p: 0.05`), and every gold row records its
-  `scoring_method`.
+- The minimum for a score is a dbt var (`ks2_min_pct: 5`), and every gold row
+  records its `scoring_method`.
 - Gold's history is **derived** from silver, never appended to. Rebuilding
   always gives the same table.
 

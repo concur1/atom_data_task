@@ -3,7 +3,7 @@
 - **Status:** accepted
 - **Date:** 2026-11-15
 - **Evidence:** [`notebooks/02_conversion_curves.py`](../../notebooks/02_conversion_curves.py)
-  and [`notebooks/03_reconciliation.py`](../../notebooks/03_reconciliation.py) (section 9)
+  (section 9 for the chosen formula)
 
 ## Context
 
@@ -18,7 +18,8 @@ out of 70).
 - They map a raw mark to a scaled score from 80 to 120.
 - A raw score of 0-2 gets no scaled score ("N").
 - 100 is the expected standard. The raw mark needed for it changes every year
-  (2024-2026: reading 25-28, maths 54-58, GPS 34-35).
+  (2024-2026: reading 25-28, maths 54-58, GPS 34-35), but it is always about
+  half the marks.
 - We copied the 2024-2026 tables into `reference_docs/` and the seed
   `ks2_scaled_score_conversion`.
 
@@ -33,163 +34,109 @@ The constraints:
 
 ## Decision
 
-Use one formula for every subject, Maths and English included. With
-$p$ = the proportion of questions answered correctly in a sitting:
+Use **linear rescaling** (min-max scaling) of the proportion correct onto the
+80-120 scale, the same for every subject. With $p$ = the proportion of
+questions answered correctly in a sitting:
 
 ```math
 \text{scaled score} =
 \begin{cases}
 \text{N (no score)} & p < 0.05 \\
-120 & p = 1 \\
-\min\Big(120,\ \max\big(80,\ \big\lfloor 100 + 7.3\,\big(\operatorname{logit}(p) - \operatorname{logit}(0.5)\big) \big\rfloor\big)\Big) & \text{otherwise}
+\lfloor 80 + 40p \rfloor & \text{otherwise}
 \end{cases}
-\qquad
-\operatorname{logit}(p) = \ln\frac{p}{1-p}
 ```
 
-Since $\operatorname{logit}(0.5) = 0$, in SQL this is:
-
-```sql
-least(120, greatest(80, floor(100 + 7.3 * ln(p / (1 - p)))))
-```
-
-Some values:
+So 0% maps to 80, 50% to 100 (the expected standard) and 100% to 120; each
+2.5% correct is one scaled point.
 
 | % correct | 10 | 25 | 40 | 50 | 60 | 75 | 90 |
 |---|---|---|---|---|---|---|---|
-| Scaled score | 83 | 91 | 97 | 100 | 102 | 108 | 116 |
+| Scaled score | 84 | 90 | 96 | 100 | 104 | 110 | 116 |
 
-- **Constants** come from the official KS2 tables, which rest on far more data
-  than our sample. Section "Fitting the constants" explains each one.
-- **Rounding** is down to the integer below, as STA does, and the result is
-  clamped to 80-120.
-- **Below the minimum** the result is `N` (null `scaled_score`), as in the
-  GOV.UK guidance. It is never rounded up to 80.
-- **Where it lives:** one macro, `macros/ks2_scaled_score.sql`. The constants
-  are dbt vars (`ks2_logit_slope`, `ks2_logit_p_cut`, `ks2_min_p`), and every
-  output row records `scoring_method = 'ks2_logit_v1'`.
-- **The official tables** are kept only as a seed, for calibration, checks and
-  the comparison chart. Scoring never reads them.
+- **Why linear:** it is the most standard tool for putting a percentage on a
+  different range, has no fitted constants, needs no clamping and is easy to
+  explain. It matches the two facts the KS2 tables agree on every year: the
+  scale runs 80-120, and the expected standard is about half the marks.
+- **Rounding** is down to the integer below, as STA does for KS2. It's
+  computed in integer arithmetic, `80 + div(40 * correct, questions)`, so
+  there is no floating-point rounding.
+- **Below the minimum** (5% correct, mirroring the KS2 rule that 3 raw marks
+  are needed for any score, 2.7-6% of the marks) there is no score:
+  `has_scaled_score = false` and `scaled_score` is null. It is never rounded
+  up to 80.
+- **Where it lives:** one macro, `macros/ks2_scaled_score.sql`, with the
+  minimum as a dbt var (`ks2_min_pct: 5`). Every output row records
+  `scoring_method = 'linear_v1'`.
+- **The official tables** are kept only as a seed, for checks and comparison
+  charts. Scoring never reads them.
 
 What counts as "correct" and "questions" is settled in ADR 0001: one answer
 per (sitting, question), where duplicate copies count as correct only if every
 copy is correct; no-attempts count as wrong; only scorable sittings are used.
 
-## Where the formula comes from
+## How it compares with the official tables
 
-The formula is **our derivation**, not something STA publishes. It combines
-STA's documented scaling method with a standard approximation from item
-response theory (IRT).
+Against all nine 2024-2026 tables, over the raw scores that get a score
+(`notebooks/02_conversion_curves.py`, section 9):
 
-### 1. STA's scale is a straight line in ability
+| Subject | Mean error (points) | Max error | Agrees on "met the expected standard" |
+|---|---|---|---|
+| GPS | 0.9-1.1 | 3 | 98.5-100% of raw scores |
+| Reading | 0.9-1.4 | 3 | 93.8-100% |
+| Maths | 1.9-2.4 | 5 | 97.1-99.0% |
+| **All** | **1.55** | **5** | |
 
-STA's
+- For comparison, the official tables differ from each other year to year by
+  0.4-1.8 points on average (max 4).
+- **Maths** is the weakest fit. Its curve is flat in the middle and steep at
+  the ends, so a straight line is about 1.8 points harsh below 20% and about
+  2.6 points generous above 80%. GPS comes out slightly harsh throughout,
+  reading slightly generous.
+- **On Atom data**, compared with reading Maths and English off the 2026
+  tables, the mean gap is 2.0 points for Maths and 0.7 for English. The two
+  agree on "met the expected standard" for 95.6% and 100% of sittings.
+
+## Options considered
+
+| Option | Fit to official tables (mean / max) | Verdict |
+|---|---|---|
+| Read % off one year's real KS2 table | exact, for that paper | Rejected: calibrated to a specific KS2 paper, not an Atom assessment; no table for non-KS2 subjects. |
+| Average of the three KS2 curves | about 1 / 4 | Rejected: a derived lookup table, harder to explain. |
+| **Linear rescaling, 80 + 40p** | **1.55 / 5** | **Chosen:** standard, no fitted constants. |
+| Linear, fitted (82.5 + 35p, clamped) | 1.33 / 5 | Rejected: fitted constants for little gain. |
+| Logit formula (below) | 0.97 / 5 | Rejected: about 0.6 points more accurate, but needs a derivation and two fitted constants. |
+| Probit, 100 + 12.1·z(p) | 0.96 / 4 | Rejected: reads like a norm-referenced standardised score, which it isn't. |
+| Adjust for question difficulty with Atom data | n/a | Later: needs more data than this sample. |
+
+### The logit alternative, and where it comes from
+
+The more faithful alternative follows STA's documented method. The
 [National curriculum test handbook](https://dera.ioe.ac.uk//35121/1/2019_national_curriculum_test_handbook.pdf)
-(section 13, "Standard setting and standards maintenance") describes how the
-tables are made:
-
-- **2016:** panels of teachers set the expected standard with a "Bookmark"
-  exercise, ordering items with "a two-parameter IRT model".
-- **2017 onwards:** each new test is equated back to 2016 using anchor tests
-  and "a multiple-group, two-parameter graded response IRT model".
-- **Scaling:** "A linear IRT scale transformation was used" (their Equation 1):
+(section 13) says KS2 scaled scores are a **linear transformation of IRT
+ability** (their Equation 1, rounded down):
 
 ```math
 SC_i = 100 + \frac{\sigma(SC)}{\sigma(\theta)}\,\big(\theta_{X_i} - \theta_{cut}\big)
 ```
 
-where $\theta_{X_i}$ is the IRT ability for raw score $X_i$ and
-$\theta_{cut}$ the ability at the expected standard. "Scaled scores were
-rounded down to the integer below."
-
-So **the scaled score is linear in ability $\theta$, not in raw marks.** The
-S-shape of the tables, when plotted against % of marks, comes from the link
-between raw marks and ability.
-
-### 2. Ability is roughly the log-odds of % correct
-
-In a two-parameter IRT model, the chance that a pupil of ability $\theta$
-answers question $i$ correctly is
-
-```math
-P_i(\theta) = \frac{1}{1 + e^{-a_i(\theta - b_i)}}
-```
-
-where $b_i$ is the question's difficulty and $a_i$ its discrimination. If the
-questions on a test are similar ($a_i \approx a$, $b_i \approx b$), a pupil's
-proportion correct $p$ follows the same curve, and inverting it gives
-
-```math
-\theta \approx b + \frac{1}{a}\,\operatorname{logit}(p)
-```
-
-When question difficulties vary, the standard normal approximation (the
-"PROX" estimate; Wright and Stone, *Best Test Design*, 1979) keeps the same
-form with a wider slope:
-
-```math
-\theta \approx \bar{b} + \sqrt{1 + \frac{\sigma_b^2}{2.89}}\;\operatorname{logit}(p)
-```
-
-Either way, **ability is a straight line in $\operatorname{logit}(p)$.**
-
-### 3. Substitute into STA's equation
-
-Putting step 2 into step 1, every constant collapses into two:
+In a two-parameter IRT model, the chance of a correct answer is
+$P(\theta) = 1 / (1 + e^{-a(\theta - b)})$. On a test of similar questions,
+inverting it gives ability as a straight line in the log-odds of the
+proportion correct, $\theta \approx b + \operatorname{logit}(p)/a$ with
+$\operatorname{logit}(p) = \ln\frac{p}{1-p}$. With varied question
+difficulties the same form holds with a wider slope (the "PROX" approximation;
+Wright and Stone, *Best Test Design*, 1979). Substituting gives
 
 ```math
 SC \approx 100 + k\,\big(\operatorname{logit}(p) - \operatorname{logit}(p_{cut})\big)
 ```
 
-- $k$ (scaled points per logit) absorbs STA's $\sigma(SC)/\sigma(\theta)$ and
-  the test's item discrimination and spread.
-- $p_{cut}$ is the proportion correct at the expected standard
-  ($\theta_{cut}$).
-
-STA doesn't publish item parameters, so $k$ and $p_{cut}$ can't be computed
-directly. We fit them to the published tables instead.
-
-### 4. Fitting the constants
-
-Grid search for the $(k, p_{cut})$ that minimises the mean absolute error
-against the tables (`notebooks/02_conversion_curves.py`, section 7):
-
-| | $k$ | $p_{cut}$ | Mean error (points) | Max error |
-|---|---|---|---|---|
-| Each table fitted on its own | 5.8-8.3 | 0.48-0.54 | 0.15-0.44 | 1-3 |
-| **One formula for all nine tables** | **7.3** | **0.498** | 0.96 | 5 |
-
-- Fitted per table, the formula reproduces the official tables almost
-  exactly. That confirms the derivation describes how the real curves behave.
-- $k$ is lower for maths (about 6) than for reading and GPS (about 8). That's
-  consistent with step 2: a test with a wider spread of question difficulty
-  has a flatter curve.
-- We use the single formula so every subject is treated the same. $p_{cut}$ is
-  rounded to 0.5 ("about half the marks", true of every table).
-- $\min_p = 0.05$ mirrors the KS2 rule that 3 raw marks are needed for any
-  score, which is 2.7-6% of the marks depending on subject.
-
-## Options considered
-
-| Option | Fit to official tables | Verdict |
-|---|---|---|
-| Read % off one year's real KS2 table | exact, for that paper | Rejected: calibrated to a specific KS2 paper, not an Atom assessment; no table for non-KS2 subjects. |
-| Average of the three KS2 curves | about 1 point mean, max 4 | Rejected: a derived lookup table, harder to explain than one formula. |
-| Straight lines through the 80, 100 and 120 points | 1.1-3.2 points mean, max 6 | Rejected: ignores the curve's shape. |
-| **KS2-shaped logit formula** | **0.6-1.5 points mean, max 5** | **Chosen.** |
-| Adjust for question difficulty with Atom data | n/a | Later: needs more data than this sample. |
-| Full IRT (Rasch) model of Atom items | n/a | Out of scope for this task. |
-
-## Evidence
-
-- **Against the official tables**, the single formula is 0.6-1.5 points off on
-  average (max 5, at the low end of maths). That's about the size of the
-  official tables' own year-to-year differences (mean 0.4-1.8, max 4).
-- **On Atom data**, compared with reading Maths and English off the 2026
-  tables, it agrees on "met the expected standard" for 95.6% (Maths) and 100%
-  (English) of sittings, with a mean gap under 1 point.
-- 16 of the 2,303 scored sittings get `N`.
-- An independent Python recalculation matches every score in gold.
+with $k = 7.3$ and $p_{cut} = 0.5$ fitted to the nine tables. Fitted per table
+it reproduces them almost exactly (0.15-0.44 points), which shows the S-shape
+of the tables comes from the raw-mark-to-ability relationship. We chose the
+linear formula anyway: it's simpler and more standard, and the logit's extra
+accuracy (about 0.6 points on average) is small next to the assumption that
+an Atom assessment behaves like a KS2 paper at all.
 
 ## Consequences
 
@@ -197,15 +144,16 @@ against the tables (`notebooks/02_conversion_curves.py`, section 7):
 - Scores are **"KS2-equivalent", not KS2 results.** They assume an Atom
   assessment is about as hard as a KS2 paper and that one question is worth
   one mark (some KS2 questions are worth 2-3).
+- Linear rescaling ignores the S-shape of the real curves, so scores near the
+  extremes differ most from what a KS2 table would give, especially for maths.
 - Years 1-5 are scored on a scale designed for the end of year 6. The output
   carries `year_group_at_sitting` so consumers can filter or caveat.
 - Scores for Screeners and Verbal and Non-Verbal Reasoning have no national
   test behind them.
-- The 2016 standard-setting exercise isn't reproduced; we inherit its result
-  through the fitted curve.
-- Short sittings give coarse scores (8 questions = steps of 12.5%). Question
-  counts are kept in the output so reliability can be judged.
-- Changing a constant changes every score, so it must come with a new
+- Short sittings give coarse scores (8 questions = steps of 12.5%, i.e. 5
+  scaled points). Question counts are kept in the output so reliability can
+  be judged.
+- Changing the formula changes every score, so it must come with a new
   `scoring_method` value.
 
 ## Open
@@ -218,11 +166,8 @@ against the tables (`notebooks/02_conversion_curves.py`, section 7):
 ## Not doing (yet)
 
 - **Adjusting for question difficulty with Atom data.** Estimate each
-  question's difficulty from Atom responses and use the PROX form in step 2
-  (mean difficulty plus scaled $\operatorname{logit}(p)$) as ability, keeping
-  the same scale. This removes the "as hard as KS2" assumption once there's
-  enough data.
-- **A full IRT (Rasch) model** of Atom items, the closest analogue of STA's
-  method.
-- **Recalibrating** $k$ and $p_{cut}$ when new KS2 tables are published: rerun
-  the fit in `02_conversion_curves` and release as `ks2_logit_v2`.
+  question's difficulty from Atom responses and adjust each pupil's result
+  before rescaling. This would remove the "as hard as KS2" assumption once
+  there's enough data.
+- **Switching to the logit formula** if the extra accuracy at the extremes
+  ever matters more than simplicity (`scoring_method = 'logit_v1'`).
