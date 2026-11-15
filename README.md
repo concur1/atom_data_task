@@ -31,8 +31,10 @@ one), separated by folder and the `<layer>__<entity>` model-name prefix:
 
 ## Design decisions
 
-The data model and point-in-time semantics are recorded in
-[`docs/adr/0001-scoring-data-model.md`](docs/adr/0001-scoring-data-model.md).
+- [`docs/adr/0001-scoring-data-model.md`](docs/adr/0001-scoring-data-model.md):
+  data model and point-in-time semantics.
+- [`docs/adr/0002-scaled-score-curve.md`](docs/adr/0002-scaled-score-curve.md):
+  how % correct becomes a scaled score (the curve).
 
 ## What I built
 

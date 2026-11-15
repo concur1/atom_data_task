@@ -51,6 +51,7 @@ source de_raw ─┬─ silver__sittings        one row per sitting: scoring rul
   score via one macro, `ks2_scaled_score(p)`:
   `least(120, greatest(80, floor(100 + k * (ln(p / (1 - p)) - ln(p_cut / (1 - p_cut))))))`,
   or no score (`N`) if `p < min_p`.
+  Why this formula and these constants: [ADR 0002](0002-scaled-score-curve.md).
 
 ### Gold: sparse type-2 history
 
