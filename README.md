@@ -337,7 +337,21 @@ schools*](https://ffteducationdatalab.org.uk/2022/11/a-quick-overview-of-fft-est
 
 I used Claude Code throughout: to explore the data, research the KS2 and GCSE
 literature, write the dbt models, tests and notebooks, and review the work.
-I made the design decisions through a question-and-answer process with it,
-and each piece of work went in as a small pull request that I reviewed. The
-full session is included with the submission as `ai_chat_log.txt` (with an
+Each piece of work went in as a small pull request that I reviewed. How I set
+it up:
+
+- **Grilling skill for decisions:** before each piece of work, Claude asked me
+  rounds of questions (each with a recommended answer) until every design
+  decision was settled, so the decisions are mine and written down (see the
+  ADRs).
+- **dbt skills:** I installed Claude skills for dbt (running commands, unit
+  tests, analytics-engineering practice) so it followed dbt conventions.
+- **`AGENTS.md`:** project instructions for the agent: the tooling (uv, dbt,
+  ruff, ty, sqruff), the medallion layers and naming, working in small stacked
+  PRs, agreeing test behaviour with me first, and how to reconcile a pipeline.
+- **A Claude Code hook** (`.claude/settings.json`) that runs the full check
+  suite (lint, type checks, `dbt build` with tests) before Claude can
+  `git push`, the same checks as the git pre-push hook and CI.
+
+The full session is included with the submission as `ai_chat_log.txt` (with an
 access token redacted).
