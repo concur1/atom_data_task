@@ -9,9 +9,12 @@ a written answer on predicting GCSE results.
 - **The brief:** [`reference_docs/take_home_task_content.md`](reference_docs/take_home_task_content.md).
   The GOV.UK scaled-score guidance is in
   [`reference_docs/gov_scaled_conversion_tables.md`](reference_docs/gov_scaled_conversion_tables.md).
-- **Start here:** [PR #10](https://github.com/concur1/atom_data_task/pull/10)
-  creates the gold model (`gold__pupil_subject_scores`) and the notebook that
-  reconciles it against the official KS2 conversion tables.
+- **Start here:** the gold model
+  [`models/gold/gold__pupil_subject_scores.sql`](models/gold/gold__pupil_subject_scores.sql)
+  and [`notebooks/03_reconciliation.py`](notebooks/03_reconciliation.py),
+  which reconciles it against the official KS2 conversion tables (its main
+  charts are embedded under Question 1). The GitHub repository and its pull
+  requests are private; I can grant access on request.
 - **Design decisions:**
   [ADR 0001](docs/adr/0001-scoring-data-model.md) (data model and point in
   time) and [ADR 0002](docs/adr/0002-scaled-score-curve.md) (how % correct
@@ -332,4 +335,9 @@ schools*](https://ffteducationdatalab.org.uk/2022/11/a-quick-overview-of-fft-est
 
 ## AI usage
 
-_TODO: link to exported Claude Code chat logs._
+I used Claude Code throughout: to explore the data, research the KS2 and GCSE
+literature, write the dbt models, tests and notebooks, and review the work.
+I made the design decisions through a question-and-answer process with it,
+and each piece of work went in as a small pull request that I reviewed. The
+full session is included with the submission as `ai_chat_log.txt` (with an
+access token redacted).
