@@ -8,12 +8,16 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # ai_chat_log.txt is a verbatim Claude Code export: don't rewrite it.
       - id: trailing-whitespace
+        exclude: ^ai_chat_log\.txt$
       - id: end-of-file-fixer
+        exclude: ^ai_chat_log\.txt$
       - id: check-yaml
       - id: check-toml
       - id: check-merge-conflict
       - id: check-added-large-files
+        exclude: ^ai_chat_log\.txt$
 
   - repo: local
     hooks:
