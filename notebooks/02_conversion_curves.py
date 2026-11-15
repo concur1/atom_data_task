@@ -23,9 +23,8 @@ def _(mo):
     % correct on an Atom assessment should map onto the 80-120 scale, and
     whether one algorithm can cover subjects that have no KS2 test.
 
-    **Data:** `seeds/ks2_scaled_score_conversion.csv`, built from the GOV.UK
-    tables in `reference_docs/` by `scripts/build_ks2_conversion_seed.py`
-    (2024-2026; reading /50, maths /110, GPS /70). Sections 1-8 run offline;
+    **Data:** `seeds/ks2_scaled_score_conversion.csv`, a copy of the GOV.UK
+    tables in `reference_docs/` (2024-2026; reading /50, maths /110, GPS /70). Sections 1-8 run offline;
     section 9 queries BigQuery.
     """)
     return
