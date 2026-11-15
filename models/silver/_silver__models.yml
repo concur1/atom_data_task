@@ -3,46 +3,254 @@ version: 2
 models:
   - name: silver__sittings
     description: >
-      One row per assessment sitting (pupils marked deleted are dropped), with
-      the scoring rules applied as flags. `is_scorable` is true when
-      `exclusion_reason` is null.
+      One row per assessment sitting (sittings of deleted pupils are dropped),
+      with the scoring rules applied as flags. Rebuilt in full on every run.
     columns:
       - name: session_id
-        description: Sitting identifier (natural key).
-      - name: response_rows
-        description: Raw response rows for the sitting (before de-duplication).
+        description: Sitting identifier (primary key).
+        data_tests:
+          - unique
+          - not_null
+      - name: pupil_id
+        description: Pupil who sat the assessment.
+      - name: assessment_id
+        description: Assessment that was sat.
+      - name: session_type
+        description: Type of session, e.g. `summative_assessment`.
+      - name: style
+        description: Style of the assessment, e.g. `fixed_question`, `survey`, `adaptive`.
+      - name: year_group_at_sitting
+        description: Pupil's school year group when they sat the assessment.
+      - name: total_questions
+        description: Number of questions in the assessment.
+      - name: is_complete
+        description: Whether the pupil completed the sitting.
+      - name: is_deleted
+        description: Soft-delete flag for the sitting.
+      - name: started_at
+        description: When the sitting started.
+      - name: finished_at
+        description: When the sitting finished (when its score takes effect).
       - name: exclusion_reason
         description: >
           Why the sitting isn't scored, in precedence order: `deleted`,
-          `incomplete`, `survey`, `adaptive`, `year_group_above_6`,
-          `no_responses`. Null when scorable.
+          `incomplete`, `survey`, `adaptive`, `year_group_above_6`. Null when
+          scorable.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [deleted, incomplete, survey, adaptive, year_group_above_6]
       - name: is_scorable
-        description: True when the sitting feeds a scaled score.
+        description: True when the sitting can feed a scaled score.
 
   - name: silver__answers
     description: >
-      One row per (sitting, question): duplicate response rows collapsed.
-      Correct only if every copy is correct.
+      One row per (sitting, question), duplicate response rows collapsed.
+      Incremental by day (microbatch on `answered_at`); no sitting or pupil
+      rules applied.
     columns:
       - name: answer_id
         description: Surrogate key, hash of (session_id, question_id).
+        data_tests:
+          - unique
+          - not_null
+      - name: session_id
+        description: Sitting the answer belongs to (may have no sitting row).
+      - name: pupil_id
+        description: Pupil who answered.
+      - name: question_id
+        description: Question answered.
+      - name: subject_id
+        description: Subject of the question (from course_hierarchy).
+      - name: subject_name
+        description: Subject display name.
+      - name: is_correct
+        description: Correct only if every duplicate copy was correct.
+      - name: is_no_attempt
+        description: True if the pupil skipped the question (counts as wrong).
       - name: response_copies
         description: Raw response rows collapsed into this answer.
       - name: has_conflicting_copies
         description: True when the copies disagreed on `is_correct`.
+      - name: question_number
+        description: Position of the question within the sitting.
+      - name: answered_at
+        description: When the answer was recorded (the microbatch event time).
 
   - name: silver__sitting_scores
     description: >
-      One row per scorable sitting and subject: questions, correct answers,
-      proportion correct `p` and the KS2-shaped scaled score.
+      One row per (sitting, subject): questions answered, correct answers and
+      the scaled score. Incremental (merge); no sitting or pupil rules applied.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [session_id, subject_id]
     columns:
+      - name: session_id
+        description: Sitting.
+        data_tests:
+          - not_null
+      - name: pupil_id
+        description: Pupil.
+      - name: subject_id
+        description: Subject.
+        data_tests:
+          - not_null
+      - name: subject_name
+        description: Subject display name.
+      - name: questions
+        description: Distinct questions answered in the sitting for this subject.
+      - name: correct
+        description: Questions answered correctly.
+      - name: last_answered_at
+        description: Latest answer in the sitting; drives the incremental lookback.
       - name: p
-        description: Proportion of questions answered correctly (no-attempts count as wrong).
+        description: Proportion correct, correct / questions.
       - name: scaled_score
         description: >
-          `ks2_scaled_score(correct, questions)` = floor(80 + 40p): 80-120,
-          null below `ks2_min_pct` percent correct.
+          `ks2_scaled_score(correct, questions)` = floor(80 + 40p); null below
+          `ks2_min_pct` percent correct.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 80
+                max_value: 120
       - name: has_scaled_score
         description: False when below the minimum for a scaled score ("N").
       - name: meets_expected_standard
-        description: Scaled score of 100 or more (false for `N`).
+        description: Scaled score of 100 or more (false when there's no score).
+
+unit_tests:
+  - name: sittings_flag_exclusions_and_drop_deleted_pupils
+    description: >
+      Exclusion reasons follow the precedence order, scorable sittings have no
+      reason, and sittings of deleted pupils are dropped entirely.
+    model: silver__sittings
+    given:
+      - input: source('de_raw', 'pupils')
+        rows:
+          - {pupil_id: p1, is_deleted: false}
+          - {pupil_id: p_deleted, is_deleted: true}
+      - input: source('de_raw', 'assessment_sittings')
+        rows:
+          - {session_id: ok, pupil_id: p1, style: fixed_question, year_group_at_sitting: 5, is_complete: true, is_deleted: false}
+          - {session_id: del, pupil_id: p1, style: fixed_question, year_group_at_sitting: 5, is_complete: false, is_deleted: true}
+          - {session_id: inc, pupil_id: p1, style: survey, year_group_at_sitting: 5, is_complete: false, is_deleted: false}
+          - {session_id: sur, pupil_id: p1, style: survey, year_group_at_sitting: 9, is_complete: true, is_deleted: false}
+          - {session_id: ada, pupil_id: p1, style: adaptive, year_group_at_sitting: 5, is_complete: true, is_deleted: false}
+          - {session_id: yg, pupil_id: p1, style: fixed_question, year_group_at_sitting: 11, is_complete: true, is_deleted: false}
+          - {session_id: gone, pupil_id: p_deleted, style: fixed_question, year_group_at_sitting: 5, is_complete: true, is_deleted: false}
+    expect:
+      rows:
+        - {session_id: ok, exclusion_reason: null, is_scorable: true}
+        - {session_id: del, exclusion_reason: deleted, is_scorable: false}
+        - {session_id: inc, exclusion_reason: incomplete, is_scorable: false}
+        - {session_id: sur, exclusion_reason: survey, is_scorable: false}
+        - {session_id: ada, exclusion_reason: adaptive, is_scorable: false}
+        - {session_id: yg, exclusion_reason: year_group_above_6, is_scorable: false}
+
+  - name: answers_collapse_duplicates_correct_only_if_all_copies_correct
+    description: >
+      Duplicate rows for a question in a sitting become one answer, correct
+      only if every copy is correct.
+    model: silver__answers
+    given:
+      - input: source('de_raw', 'course_hierarchy')
+        rows:
+          - {question_id: q1, subject_id: maths, subject_name: Maths}
+          - {question_id: q2, subject_id: maths, subject_name: Maths}
+          - {question_id: q3, subject_id: maths, subject_name: Maths}
+      - input: source('de_raw', 'responses')
+        rows:
+          - {session_id: s1, pupil_id: p1, question_id: q1, is_correct: true, is_no_attempt: false, question_number: 1, answered_at: "2026-01-10 09:00:00"}
+          - {session_id: s1, pupil_id: p1, question_id: q2, is_correct: true, is_no_attempt: false, question_number: 2, answered_at: "2026-01-10 09:01:00"}
+          - {session_id: s1, pupil_id: p1, question_id: q2, is_correct: false, is_no_attempt: false, question_number: 2, answered_at: "2026-01-10 09:01:00"}
+          - {session_id: s1, pupil_id: p1, question_id: q3, is_correct: true, is_no_attempt: false, question_number: 3, answered_at: "2026-01-10 09:02:00"}
+          - {session_id: s1, pupil_id: p1, question_id: q3, is_correct: true, is_no_attempt: false, question_number: 3, answered_at: "2026-01-10 09:02:00"}
+    expect:
+      rows:
+        - {session_id: s1, question_id: q1, is_correct: true, response_copies: 1, has_conflicting_copies: false}
+        - {session_id: s1, question_id: q2, is_correct: false, response_copies: 2, has_conflicting_copies: true}
+        - {session_id: s1, question_id: q3, is_correct: true, response_copies: 2, has_conflicting_copies: false}
+
+  - name: sitting_scores_formula_edge_cases
+    description: >
+      floor(80 + 40p) in integer arithmetic, with no score below 5% correct.
+    model: silver__sitting_scores
+    overrides:
+      macros:
+        is_incremental: false
+    given:
+      - input: ref('silver__answers')
+        format: sql
+        rows: |
+          {%- set cases = [('none_of_20', 20, 0), ('exactly_5pct', 20, 1),
+                           ('below_5pct', 21, 1), ('half', 2, 1),
+                           ('all', 1, 1), ('two_of_three', 3, 2)] -%}
+          {%- for session, total, correct in cases %}
+          select
+              cast(null as string) as answer_id,
+              '{{ session }}' as session_id,
+              'p1' as pupil_id,
+              cast(q as string) as question_id,
+              'maths' as subject_id,
+              'Maths' as subject_name,
+              q <= {{ correct }} as is_correct,
+              false as is_no_attempt,
+              1 as response_copies,
+              false as has_conflicting_copies,
+              q as question_number,
+              timestamp '2026-01-10 09:00:00' as answered_at
+          from unnest(generate_array(1, {{ total }})) as q
+          {% if not loop.last %}union all{% endif %}
+          {%- endfor %}
+    expect:
+      rows:
+        - {session_id: none_of_20, questions: 20, correct: 0, scaled_score: null, has_scaled_score: false}
+        - {session_id: exactly_5pct, questions: 20, correct: 1, scaled_score: 82, has_scaled_score: true}
+        - {session_id: below_5pct, questions: 21, correct: 1, scaled_score: null, has_scaled_score: false}
+        - {session_id: half, questions: 2, correct: 1, scaled_score: 100, has_scaled_score: true}
+        - {session_id: all, questions: 1, correct: 1, scaled_score: 120, has_scaled_score: true}
+        - {session_id: two_of_three, questions: 3, correct: 2, scaled_score: 106, has_scaled_score: true}
+
+  - name: sitting_scores_incremental_rescores_whole_recent_sittings
+    description: >
+      In an incremental run, a sitting with an answer inside the lookback is
+      re-scored from all of its answers (old and new); sittings with no recent
+      answers are left alone.
+    model: silver__sitting_scores
+    overrides:
+      macros:
+        is_incremental: true
+      vars:
+        answers_lookback_days: 3
+    given:
+      # As SQL (not dict rows) so the fixture doesn't depend on the columns of
+      # whatever table currently exists in the warehouse.
+      - input: this
+        format: sql
+        rows: |
+          select
+              session_id,
+              'p1' as pupil_id,
+              'maths' as subject_id,
+              'Maths' as subject_name,
+              1 as questions,
+              1 as correct,
+              timestamp(last_answered_at) as last_answered_at,
+              1.0 as p,
+              120 as scaled_score,
+              true as has_scaled_score,
+              true as meets_expected_standard
+          from unnest([
+              struct('recent' as session_id, '2026-01-10 09:00:00' as last_answered_at),
+              struct('old' as session_id, '2025-12-01 09:00:00' as last_answered_at)
+          ])
+      - input: ref('silver__answers')
+        rows:
+          - {session_id: recent, pupil_id: p1, subject_id: maths, subject_name: Maths, question_id: q1, is_correct: true, answered_at: "2026-01-05 09:00:00"}
+          - {session_id: recent, pupil_id: p1, subject_id: maths, subject_name: Maths, question_id: q2, is_correct: false, answered_at: "2026-01-10 09:00:00"}
+          - {session_id: old, pupil_id: p2, subject_id: maths, subject_name: Maths, question_id: q1, is_correct: true, answered_at: "2025-12-01 09:00:00"}
+    expect:
+      rows:
+        - {session_id: recent, questions: 2, correct: 1, scaled_score: 100}

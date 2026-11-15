@@ -66,6 +66,9 @@ sources:
 
       - name: responses
         description: One row per question a pupil answered.
+        config:
+          # Lets microbatch models read only the days they're building.
+          event_time: answered_at
         columns:
           - name: response_id
             description: Response identifier.

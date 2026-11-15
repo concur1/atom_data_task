@@ -3,8 +3,25 @@
 dbt models that give every pupil a KS2 SATs-style scaled score (80–120) in every
 subject, based on their responses to Atom assessments. Built on BigQuery.
 
+> **Start here:** [PR #10](https://github.com/concur1/atom_data_task/pull/10)
+> creates the gold model (`gold__pupil_subject_scores`) and the notebook that
+> reconciles it against the official KS2 conversion tables.
+
 The brief is in [`reference_docs/take_home_task_content.md`](reference_docs/take_home_task_content.md);
 the GOV.UK scaled-score guidance is in [`reference_docs/gov_scaled_conversion_tables.md`](reference_docs/gov_scaled_conversion_tables.md).
+
+## Prerequisites
+
+- **[uv](https://docs.astral.sh/uv/getting-started/installation/)** manages
+  the Python environment and installs the right Python version (3.12) itself.
+  Other tools such as pip or Poetry aren't supported: the pinned versions live
+  in `uv.lock`, and `pyproject.toml` uses uv-specific settings
+  (`[tool.uv] override-dependencies`, which keeps a dbt dependency that fails
+  to build on some machines out of the install, and `[dependency-groups]` for
+  the dev tools).
+- **[gcloud CLI](https://cloud.google.com/sdk/docs/install)**, logged in with
+  access to the `atom-analytics-candidates` BigQuery project.
+- **make** and **git**.
 
 ## Quick start
 
@@ -50,6 +67,84 @@ select * from owen_cain.gold__pupil_subject_scores where is_current;
 select * from owen_cain.gold__pupil_subject_scores
 where valid_from <= @t and (valid_to > @t or valid_to is null);
 ```
+
+## Results
+
+Both charts come from
+[`notebooks/03_reconciliation.py`](notebooks/03_reconciliation.py).
+
+### 1. Our scores are close to the official GOV.UK conversions
+
+![Our formula vs the KS2 conversion tables, 2024-2026](reference_docs/scaled_scores_vs_raw.png)
+
+The black line is our formula, `floor(80 + 40p)` (`p` = proportion of
+questions correct). The coloured lines are the official KS2 conversion tables
+published on GOV.UK for 2024-2026 (reading, maths, and grammar, punctuation and
+spelling), plotted against the % of marks available. The red dots are the
+scored Atom sittings.
+
+Our line runs through the middle of the official curves:
+
+- On average it is within about 1 point of the GPS and reading tables and
+  about 2 points of the maths tables (at most 5 points), similar to how much
+  the official tables differ from one year to the next.
+- It agrees with the official tables on whether a pupil met the expected
+  standard (100) for 94-100% of raw scores.
+- It is furthest from maths at the extremes, where the official maths curve is
+  steepest.
+
+### 2. The distribution could be more even
+
+![Distribution of scaled scores](reference_docs/scaled_scores_distributin.png)
+
+Scores bunch in the middle of the scale: across all 2,287 scored sittings the
+mean is 102, the middle half is 96-108 and about two thirds fall in 95-109,
+while the ends of the 80-120 range are barely used. That makes it hard to tell
+pupils in the middle apart. A curve that gives a more even spread of scores
+would improve this (see [What I would do next](#what-i-would-do-next)).
+
+The comb-like pattern comes from common sitting lengths: with 25 questions,
+for example, scores move in steps of 1.6 points, so some scores occur more
+often than their neighbours.
+
+## Robust table design
+
+How the models meet the brief's "built to last" requirements. Details are in
+[ADR 0001](docs/adr/0001-scoring-data-model.md).
+
+**Done**
+
+- **Re-runnable:** keys are hashes of natural keys (no random IDs or
+  timestamps), daily batches and sittings are replaced whole, and small tables
+  are rebuilt every run. Checked: running twice gives identical tables, and an
+  incremental build gives the same tables as a full refresh.
+- **Incremental for 100m+ responses:** `silver__answers` is built in daily
+  batches (dbt microbatch, 3-day lookback, partitioned by day, clustered by
+  sitting); `silver__sitting_scores` merges only sittings with new answers.
+  A normal run reprocesses 4 days.
+- **Point in time:** gold is a type-2 history (`valid_from` / `valid_to` /
+  `is_current`), so any pupil's score can be recomputed as it stood at time T.
+- **Deletes and corrections flow through:** sitting and pupil rules are
+  applied in gold, which is rebuilt every run, so a deleted sitting or pupil
+  disappears on the next run.
+- **Tested and documented:** every column has a description; data tests
+  (unique keys, 80-120 range, one current row, unbroken history) and unit
+  tests (de-duplication, formula edge cases, incremental logic, history) run
+  in every `dbt build`, including the pre-push hook.
+
+**Would do next**
+
+- **Model contracts:** enforce column names, data types and `not_null` /
+  primary-key constraints, so a schema change fails the build instead of
+  reaching the application database.
+- **Partition `de_raw.responses` by `date(answered_at)`** upstream, so each
+  daily batch reads only its own day.
+- **Schedule the weekly `--full-refresh`** (and normal runs) in an
+  orchestrator, as the backstop for late changes.
+- **Run `dbt build` in CI** against a dev dataset (needs workload identity
+  federation for BigQuery access).
+- **Export to the application database:** version the gold model and sync it
+  incrementally, using the surrogate key and `valid_from`.
 
 ## How the pieces fit together
 
@@ -125,9 +220,37 @@ Scoring follows the KS2 rules in the GOV.UK guidance where they apply.
 - **Below the minimum raw score** a pupil gets no scaled score (`N`, outcome
   `NS`), as in the GOV.UK guidance; we don't round them up to 80.
 
+## Running it
+
+- `make build` runs `dbt build`: models, seeds, data tests and unit tests.
+  `silver__answers` and `silver__sitting_scores` are incremental, so a normal
+  run only reprocesses the last `answers_lookback_days` (3) days of answers.
+- **Schedule a full refresh** (`dbt build --full-refresh`, e.g. weekly). The
+  raw tables have no updated-at timestamps, so a response changed after the
+  lookback window is only picked up by a full refresh. Changes to sittings and
+  pupils (deletes, completions) are picked up by every normal run.
+- To rebuild a date range of answers: `dbt build --select silver__answers+
+  --event-time-start 2026-01-01 --event-time-end 2026-02-01`.
+
 ## What I would do next
 
-_TODO_
+- **A curve that spreads scores out more evenly.** Under the linear formula,
+  scores bunch in the middle: across all scored sittings the middle half is
+  about 96-108, and around two thirds fall in 95-109, so the ends of the 80-120
+  scale are barely used (see [Results](#2-the-distribution-could-be-more-even)).
+  Options: a steeper curve through the middle (the logit in ADR 0002 is
+  *flatter* there, so it would bunch scores further), or calibrating to the
+  national KS2 scaled-score distribution, i.e. mapping each pupil's
+  percentile among Atom pupils of the same year group to the national score
+  at that percentile. Either would need a new `scoring_method`.
+
+- **Partition `de_raw.responses` by `date(answered_at)`** (upstream). The daily
+  batches of `silver__answers` filter on it, but today each batch still scans
+  the whole raw table.
+
+- **Model contracts:** enforce the schema of each model (column names, data
+  types, `not_null` / primary-key constraints) with dbt model contracts, so a
+  type change fails the build instead of reaching the application database.
 
 ## AI usage
 

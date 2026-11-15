@@ -7,18 +7,27 @@ models:
       row per scored sitting. Score as of T:
       `valid_from <= T and (valid_to > T or valid_to is null)`; current score:
       `is_current`. Pupils with no scorable sitting in a subject have no rows.
-      See docs/adr/0001-scoring-data-model.md.
+      Rebuilt in full on every run. See docs/adr/0001-scoring-data-model.md.
     columns:
       - name: pupil_subject_score_id
         description: Surrogate key, hash of (pupil_id, subject_id, session_id).
+        data_tests:
+          - unique
+          - not_null
       - name: pupil_id
         description: Pupil.
+        data_tests:
+          - not_null
       - name: subject_id
         description: Subject (from course_hierarchy).
+        data_tests:
+          - not_null
       - name: subject_name
         description: Subject display name.
       - name: session_id
         description: The sitting this score comes from.
+        data_tests:
+          - not_null
       - name: assessment_id
         description: Assessment that was sat.
       - name: year_group_at_sitting
@@ -31,15 +40,48 @@ models:
         description: correct / questions.
       - name: scaled_score
         description: KS2-style scaled score 80-120; null when `has_scaled_score` is false.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 80
+                max_value: 120
       - name: has_scaled_score
         description: False when below the minimum for a scaled score ("N", under 5% correct).
       - name: meets_expected_standard
         description: Scaled score of 100 or more.
       - name: valid_from
         description: When this score took effect (the sitting's finished_at).
+        data_tests:
+          - not_null
       - name: valid_to
         description: When it was superseded by the next scored sitting; null if current.
       - name: is_current
         description: True on the latest row for the pupil and subject.
       - name: scoring_method
         description: Version of the scoring method (dbt var `scoring_method`).
+
+unit_tests:
+  - name: gold_builds_type_2_history_from_scorable_sittings
+    description: >
+      Consecutive scored sittings chain (valid_to = next valid_from) and only
+      the latest is current; unscorable sittings are left out; a sitting with
+      no scaled score is still a history row.
+    model: gold__pupil_subject_scores
+    given:
+      - input: ref('silver__sittings')
+        rows:
+          - {session_id: first, assessment_id: a1, year_group_at_sitting: 5, finished_at: "2026-01-01 10:00:00", is_scorable: true}
+          - {session_id: second, assessment_id: a2, year_group_at_sitting: 5, finished_at: "2026-02-01 10:00:00", is_scorable: true}
+          - {session_id: unscorable, assessment_id: a3, year_group_at_sitting: 5, finished_at: "2026-03-01 10:00:00", is_scorable: false}
+          - {session_id: no_score, assessment_id: a4, year_group_at_sitting: 5, finished_at: "2026-01-15 10:00:00", is_scorable: true}
+      - input: ref('silver__sitting_scores')
+        rows:
+          - {session_id: first, pupil_id: p1, subject_id: maths, subject_name: Maths, questions: 10, correct: 5, p: 0.5, scaled_score: 100, has_scaled_score: true, meets_expected_standard: true}
+          - {session_id: second, pupil_id: p1, subject_id: maths, subject_name: Maths, questions: 10, correct: 8, p: 0.8, scaled_score: 112, has_scaled_score: true, meets_expected_standard: true}
+          - {session_id: unscorable, pupil_id: p1, subject_id: maths, subject_name: Maths, questions: 10, correct: 10, p: 1.0, scaled_score: 120, has_scaled_score: true, meets_expected_standard: true}
+          - {session_id: no_score, pupil_id: p1, subject_id: english, subject_name: English, questions: 30, correct: 1, p: 0.033, scaled_score: null, has_scaled_score: false, meets_expected_standard: false}
+    expect:
+      rows:
+        - {session_id: first, subject_id: maths, valid_from: "2026-01-01 10:00:00", valid_to: "2026-02-01 10:00:00", is_current: false, scaled_score: 100}
+        - {session_id: second, subject_id: maths, valid_from: "2026-02-01 10:00:00", valid_to: null, is_current: true, scaled_score: 112}
+        - {session_id: no_score, subject_id: english, valid_from: "2026-01-15 10:00:00", valid_to: null, is_current: true, scaled_score: null}
