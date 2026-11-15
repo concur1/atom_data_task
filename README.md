@@ -56,12 +56,12 @@ where valid_from <= @t and (valid_to > @t or valid_to is null);
 ```
 de_raw (sources, bronze) ─┬─ silver__sittings        every sitting + is_scorable / exclusion_reason
                           ├─ silver__answers         one answer per (sitting, question), duplicates collapsed
-                          └─ silver__sitting_scores  p = correct / questions → ks2_scaled_score(p)
+                          └─ silver__sitting_scores  floor(80 + 40 * correct / questions)
                                        └─ gold__pupil_subject_scores  type-2 history per pupil × subject
 ```
 
-- `macros/ks2_scaled_score.sql`: the scoring formula, one place, constants as
-  dbt vars in `dbt_project.yml`.
+- `macros/ks2_scaled_score.sql`: the scoring formula, in one place; the
+  minimum for a score is a dbt var in `dbt_project.yml`.
 - `seeds/ks2_scaled_score_conversion.csv`: official KS2 tables (2024-2026),
   used to calibrate and check the formula, not for scoring.
 - Notebooks: `01_exploration` (data profiling), `02_conversion_curves`

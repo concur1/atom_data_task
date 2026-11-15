@@ -40,8 +40,9 @@ models:
         description: Proportion of questions answered correctly (no-attempts count as wrong).
       - name: scaled_score
         description: >
-          `ks2_scaled_score(p)`: 80-120, null below the minimum (`ks2_min_p`).
-      - name: score_status
-        description: "`SCORED`, or `N` when there is no scaled score."
+          `ks2_scaled_score(correct, questions)` = floor(80 + 40p): 80-120,
+          null below `ks2_min_pct` percent correct.
+      - name: has_scaled_score
+        description: False when below the minimum for a scaled score ("N").
       - name: meets_expected_standard
         description: Scaled score of 100 or more (false for `N`).

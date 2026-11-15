@@ -305,7 +305,7 @@ def _(mo):
     ## 5. Nulls
 
     Null counts per gold column. Expected nulls: `scaled_score` exactly where
-    `score_status = 'N'`, and `valid_to` exactly where `is_current`.
+    `has_scaled_score` is false, and `valid_to` exactly where `is_current`.
     """)
     return
 
@@ -325,7 +325,7 @@ def _(OUT, pl, q):
     )
     _expected = q(f"""
     select
-        countif((scaled_score is null) != (score_status = 'N')) as scaled_score_null_mismatch,
+        countif((scaled_score is null) = has_scaled_score) as scaled_score_null_mismatch,
         countif((valid_to is null) != is_current) as valid_to_null_mismatch
     from {OUT}.gold__pupil_subject_scores
     """)
@@ -475,7 +475,7 @@ def _(OUT, mo, q):
     """).row(0)
     _pupil, _subject = _pick
     _history = q(f"""
-    select session_id, valid_from, valid_to, is_current, scaled_score, score_status
+    select session_id, valid_from, valid_to, is_current, scaled_score, has_scaled_score
     from {OUT}.gold__pupil_subject_scores
     where pupil_id = '{_pupil}' and subject_name = '{_subject}'
     order by valid_from
@@ -531,19 +531,22 @@ def _(mo):
 
 @app.cell
 def _(OUT, np, pl, q):
-    K, P_CUT, MIN_P = 7.3, 0.5, 0.05
+    MIN_PCT = 5
 
-    def formula(p: np.ndarray) -> np.ndarray:
-        """ADR formula: clamp(floor(100 + k(logit p - logit p_cut)), 80, 120); NaN = N."""
-        with np.errstate(divide="ignore"):
-            logit = np.log(p / (1 - p)) - np.log(P_CUT / (1 - P_CUT))
-        score = np.clip(np.floor(100 + K * logit), 80, 120)
-        return np.where(p < MIN_P, np.nan, score)
+    def formula(correct: np.ndarray, total: np.ndarray) -> np.ndarray:
+        """ADR 0002: floor(80 + 40 * correct / total); NaN = N (below MIN_PCT %)."""
+        correct = np.asarray(correct, dtype=np.int64)
+        total = np.asarray(total, dtype=np.int64)
+        score = (80 + (40 * correct) // total).astype(float)
+        return np.where(correct * 100 < MIN_PCT * total, np.nan, score)
 
     gold = q(f"select * from {OUT}.gold__pupil_subject_scores")
-    _p = (gold["correct"] / gold["questions"]).to_numpy()
     recalculated = gold.with_columns(
-        recomputed=pl.Series(formula(_p)).fill_nan(None).cast(pl.Int64)
+        recomputed=pl.Series(
+            formula(gold["correct"].to_numpy(), gold["questions"].to_numpy())
+        )
+        .fill_nan(None)
+        .cast(pl.Int64)
     )
     recalculated.select(
         rows=pl.len(),
@@ -559,7 +562,7 @@ def _(OUT, np, pl, q):
         ).sum(),
         out_of_range=(~pl.col("scaled_score").is_between(80, 120)).sum(),
     )
-    return K, P_CUT, formula, gold
+    return formula, gold
 
 
 @app.cell
@@ -568,14 +571,15 @@ def _(mo):
     ## 9. Our curve vs the KS2 curves
 
     The official 2024-2026 KS2 conversion tables (the `ks2_scaled_score_conversion`
-    seed, plotted as % of available marks) against our KS2-shaped logit formula,
+    seed, plotted as % of available marks) against our linear rescaling
+    (`80 + 40p`, ADR 0002),
     with every scored Atom sitting overlaid.
     """)
     return
 
 
 @app.cell
-def _(K, OUT, P_CUT, alt, formula, gold, mo, np, pl, q):
+def _(OUT, alt, formula, gold, mo, np, pl, q):
     _max_marks = {"reading": 50, "maths": 110, "gps": 70}
     _ks2 = (
         q(
@@ -589,12 +593,12 @@ def _(K, OUT, P_CUT, alt, formula, gold, mo, np, pl, q):
         )
         .select("pct", "scaled_score", "curve")
     )
-    _grid = np.linspace(0, 100, 401)
+    _steps = np.arange(401)  # 0.25% steps: correct = 0..400 out of 400
     _ours = pl.DataFrame(
         {
-            "pct": _grid,
-            "scaled_score": formula(_grid / 100),
-            "curve": "Atom (logit formula)",
+            "pct": _steps / 4,
+            "scaled_score": formula(_steps, np.full(401, 400)),
+            "curve": "Atom (linear 80 + 40p)",
         }
     ).filter(pl.col("scaled_score").is_not_nan())
     _points = gold.drop_nulls("scaled_score").select(
@@ -634,8 +638,7 @@ def _(K, OUT, P_CUT, alt, formula, gold, mo, np, pl, q):
     mo.vstack(
         [
             mo.md(
-                f"Black: $\\lfloor 100 + {K}\\,(\\text{{logit}}(p) - \\text{{logit}}({P_CUT}))"
-                "\\rfloor$ clamped to 80-120 (no score below 5%). Thin coloured lines: "
+                "Black: $\\lfloor 80 + 40p \\rfloor$ (no score below 5%). Thin coloured lines: "
                 "official KS2 tables. Red dots: scored Atom sittings (they lie on the "
                 "black curve by construction; their spread shows where pupils are)."
             ),
@@ -658,13 +661,14 @@ def _(OUT, formula, pl, q):
     _t = q(
         f"select * from {OUT}.ks2_scaled_score_conversion where scaled_score is not null"
     ).with_columns(
-        p=pl.col("raw_score")
-        / pl.col("ks2_subject").replace_strict(
+        max_marks=pl.col("ks2_subject").replace_strict(
             {"reading": 50, "maths": 110, "gps": 70}, return_dtype=pl.Int64
         )
     )
     _t.with_columns(
-        ours=pl.Series(formula(_t["p"].to_numpy())).fill_nan(None)
+        ours=pl.Series(
+            formula(_t["raw_score"].to_numpy(), _t["max_marks"].to_numpy())
+        ).fill_nan(None)
     ).drop_nulls("ours").group_by("test_year", "ks2_subject").agg(
         mean_abs_diff=(pl.col("ours") - pl.col("scaled_score")).abs().mean().round(2),
         max_abs_diff=(pl.col("ours") - pl.col("scaled_score")).abs().max(),
@@ -689,7 +693,7 @@ def _(OUT, q):
     select
         subject_name,
         count(*) as pupils,
-        countif(score_status = 'N') as no_score,
+        countif(not has_scaled_score) as no_score,
         round(avg(scaled_score), 1) as mean_scaled_score,
         min(scaled_score) as min_score,
         max(scaled_score) as max_score,

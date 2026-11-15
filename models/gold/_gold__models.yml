@@ -30,9 +30,9 @@ models:
       - name: proportion_correct
         description: correct / questions.
       - name: scaled_score
-        description: KS2-style scaled score 80-120; null when `score_status = 'N'`.
-      - name: score_status
-        description: "`SCORED`, or `N` (below the minimum for a scaled score)."
+        description: KS2-style scaled score 80-120; null when `has_scaled_score` is false.
+      - name: has_scaled_score
+        description: False when below the minimum for a scaled score ("N", under 5% correct).
       - name: meets_expected_standard
         description: Scaled score of 100 or more.
       - name: valid_from

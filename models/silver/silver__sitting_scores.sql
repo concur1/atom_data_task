@@ -39,12 +39,12 @@ scored as (
     select
         *,
         correct / questions as p,
-        {{ ks2_scaled_score('correct / questions') }} as scaled_score
+        {{ ks2_scaled_score('correct', 'questions') }} as scaled_score
     from totals
 )
 
 select
     *,
-    if(scaled_score is null, 'N', 'SCORED') as score_status,
+    scaled_score is not null as has_scaled_score,
     coalesce(scaled_score >= 100, false) as meets_expected_standard
 from scored

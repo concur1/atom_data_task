@@ -41,7 +41,7 @@ select
     correct,
     p as proportion_correct,
     scaled_score,
-    score_status,
+    has_scaled_score,
     meets_expected_standard,
     finished_at as valid_from,
     next_finished_at as valid_to,
