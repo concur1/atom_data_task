@@ -2,6 +2,9 @@
 dialect = bigquery
 templater = jinja
 rules = all
+# Python stand-ins for package macros (dbt_utils) used only when linting.
+library_path = .sqruff_libs
 
 [sqruff:templater:jinja]
 apply_dbt_builtins = True
+load_macros_from_path = macros
