@@ -1,0 +1,45 @@
+version: 2
+
+models:
+  - name: gold__pupil_subject_scores
+    description: >
+      Type-2 history of each pupil's KS2-style scaled score per subject: one
+      row per scored sitting. Score as of T:
+      `valid_from <= T and (valid_to > T or valid_to is null)`; current score:
+      `is_current`. Pupils with no scorable sitting in a subject have no rows.
+      See docs/adr/0001-scoring-data-model.md.
+    columns:
+      - name: pupil_subject_score_id
+        description: Surrogate key, hash of (pupil_id, subject_id, session_id).
+      - name: pupil_id
+        description: Pupil.
+      - name: subject_id
+        description: Subject (from course_hierarchy).
+      - name: subject_name
+        description: Subject display name.
+      - name: session_id
+        description: The sitting this score comes from.
+      - name: assessment_id
+        description: Assessment that was sat.
+      - name: year_group_at_sitting
+        description: Pupil's year group when they sat it (filter or caveat younger years).
+      - name: questions
+        description: Distinct questions answered in the sitting for this subject.
+      - name: correct
+        description: Questions answered correctly.
+      - name: proportion_correct
+        description: correct / questions.
+      - name: scaled_score
+        description: KS2-style scaled score 80-120; null when `has_scaled_score` is false.
+      - name: has_scaled_score
+        description: False when below the minimum for a scaled score ("N", under 5% correct).
+      - name: meets_expected_standard
+        description: Scaled score of 100 or more.
+      - name: valid_from
+        description: When this score took effect (the sitting's finished_at).
+      - name: valid_to
+        description: When it was superseded by the next scored sitting; null if current.
+      - name: is_current
+        description: True on the latest row for the pupil and subject.
+      - name: scoring_method
+        description: Version of the scoring method (dbt var `scoring_method`).

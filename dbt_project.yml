@@ -22,3 +22,9 @@ models:
       +materialized: view
     gold:
       +materialized: table
+
+vars:
+  # Linear rescaling onto the KS2 scale (docs/adr/0002-scaled-score-curve.md):
+  # scaled = floor(80 + 40 * correct / questions); no score below min_pct.
+  ks2_min_pct: 5
+  scoring_method: linear_v1
