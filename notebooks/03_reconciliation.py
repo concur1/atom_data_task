@@ -108,27 +108,63 @@ def _(mo):
     mo.md(r"""
     ## 2. Our curve vs the KS2 curves
 
-    Thin lines: the official tables, plotted against % of available marks.
-    Black: our formula. Red dots: every scored Atom sitting in gold.
+    The official tables are plotted against % of available marks (one colour
+    per subject, darker = later year). Black: our formula. Red dots: every
+    scored Atom sitting in gold (they sit on the black line by construction).
     """)
     return
 
 
 @app.cell
 def _(alt, compared, gold, mo, np, our_score, pl):
+    OURS = "Our formula: floor(80 + 40p)"
+    ATOM = "Atom sittings (gold)"
+
     _steps = np.arange(401)  # 0.25% steps
     _ours = pl.DataFrame(
-        {"pct": _steps / 4, "scaled_score": our_score(_steps, np.full(401, 400))}
+        {
+            "pct": _steps / 4,
+            "scaled_score": our_score(_steps, np.full(401, 400)),
+            "curve": OURS,
+        }
     ).filter(pl.col("scaled_score").is_not_nan())
     _ks2 = compared.select(
         pct="pct_of_marks",
-        scaled_score="scaled_score",
+        scaled_score=pl.col("scaled_score").cast(pl.Float64),
         curve=pl.format("KS2 {} {}", pl.col("ks2_subject"), pl.col("test_year")),
     )
     _atom = gold.drop_nulls("scaled_score").select(
         pct=100 * pl.col("proportion_correct"),
         scaled_score="scaled_score",
         subject="subject_name",
+        curve=pl.lit(ATOM),
+    )
+
+    # One colour key for everything: ours in black, Atom sittings in red, and
+    # the official tables in a shade per subject (gps blue, maths orange,
+    # reading green; darker = later year).
+    _ks2_curves = sorted(_ks2["curve"].unique().to_list())
+    _years = sorted(compared["test_year"].unique().to_list())
+    _ks2_shades = {
+        "gps": ["#9ecae9", "#4c78a8", "#1f4e79"],
+        "maths": ["#ffbf79", "#f58518", "#b85c00"],
+        "reading": ["#88d27a", "#54a24b", "#2e6b28"],
+    }
+    _colour = alt.Color(
+        "curve:N",
+        title=None,
+        scale=alt.Scale(
+            domain=[OURS, ATOM, *_ks2_curves],
+            range=[
+                "black",
+                "crimson",
+                *(
+                    _ks2_shades[c.split()[1]][min(_years.index(int(c.split()[2])), 2)]
+                    for c in _ks2_curves
+                ),
+            ],
+        ),
+        legend=alt.Legend(orient="right", symbolStrokeWidth=3),
     )
     _x = alt.X(
         "pct:Q", title="% correct / % of marks", scale=alt.Scale(domain=[0, 100])
@@ -136,18 +172,30 @@ def _(alt, compared, gold, mo, np, our_score, pl):
     _y = alt.Y(
         "scaled_score:Q", title="Scaled score", scale=alt.Scale(domain=[78, 122])
     )
+    _lines = (
+        alt.Chart(pl.concat([_ks2, _ours]))
+        .mark_line(interpolate="step-after")
+        .encode(
+            x=_x,
+            y=_y,
+            color=_colour,
+            strokeWidth=alt.condition(
+                alt.datum.curve == OURS, alt.value(3), alt.value(1.2)
+            ),
+            opacity=alt.condition(
+                alt.datum.curve == OURS, alt.value(1), alt.value(0.6)
+            ),
+        )
+    )
+    _dots = (
+        alt.Chart(_atom)
+        .mark_circle(size=18, opacity=0.35)
+        .encode(x=_x, y=_y, color=_colour, tooltip=["subject", "pct", "scaled_score"])
+    )
     mo.ui.altair_chart(
-        (
-            alt.Chart(_ks2)
-            .mark_line(interpolate="step-after", opacity=0.5, strokeWidth=1.2)
-            .encode(x=_x, y=_y, color=alt.Color("curve:N", title="Official table"))
-            + alt.Chart(_ours)
-            .mark_line(interpolate="step-after", color="black", strokeWidth=2.5)
-            .encode(x=_x, y=_y)
-            + alt.Chart(_atom)
-            .mark_circle(size=18, opacity=0.35, color="crimson")
-            .encode(x=_x, y=_y, tooltip=["subject", "pct", "scaled_score"])
-        ).properties(width=720, height=440, title="Our formula vs KS2 2024-2026")
+        (_lines + _dots).properties(
+            width=720, height=440, title="Our formula vs KS2 2024-2026"
+        )
     )
     return
 
