@@ -5,7 +5,8 @@ seeds:
     description: >
       Official KS2 raw-score to scaled-score conversion tables published by the
       Standards and Testing Agency, one row per test year, subject and raw score
-      (0 to the subject's maximum). Parsed from the GOV.UK HTML tables:
+      (0 to the subject's maximum). Copied from the tables in reference_docs/,
+      checked row for row against the GOV.UK pages:
       https://www.gov.uk/government/publications/key-stage-2-tests-2024-scaled-scores/2024-key-stage-2-scaled-score-conversion-tables
       https://www.gov.uk/government/publications/key-stage-2-tests-2025-scaled-scores/2025-key-stage-2-scaled-score-conversion-tables
       https://www.gov.uk/government/publications/key-stage-2-tests-2026-scaled-scores/2026-key-stage-2-scaled-score-conversion-tables

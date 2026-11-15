@@ -31,8 +31,10 @@ one), separated by folder and the `<layer>__<entity>` model-name prefix:
 
 ## Design decisions
 
-The data model and point-in-time semantics are recorded in
-[`docs/adr/0001-scoring-data-model.md`](docs/adr/0001-scoring-data-model.md).
+- [`docs/adr/0001-scoring-data-model.md`](docs/adr/0001-scoring-data-model.md):
+  data model and point-in-time semantics.
+- [`docs/adr/0002-scaled-score-curve.md`](docs/adr/0002-scaled-score-curve.md):
+  how % correct becomes a scaled score (the curve).
 
 ## What I built
 
@@ -69,15 +71,14 @@ Evidence for each is in [`notebooks/01_exploration.py`](notebooks/01_exploration
 
 Scoring follows the KS2 rules in the GOV.UK guidance where they apply.
 
-- **Conversion to the 80-120 scale:** one KS2-shaped formula for every
-  subject, `least(120, greatest(80, floor(100 + 7.3 * ln(p / (1 - p)))))`,
-  where `p` is the proportion of questions correct; no score (`N`) if
-  `p < 0.05`. STA's documented scaling is linear in IRT ability, and
-  `logit(p)` approximates ability, so this reproduces the official 2024-2026
-  KS2 tables to ~1 point on average (fit and evidence in
-  [`notebooks/02_conversion_curves.py`](notebooks/02_conversion_curves.py)).
-  The real tables aren't applied directly because an Atom assessment isn't
-  the KS2 paper they were calibrated on.
+- **Conversion to the 80-120 scale:** linear rescaling for every subject,
+  `floor(80 + 40p)`, where `p` is the proportion of questions correct (0% →
+  80, 50% → 100, 100% → 120); no score (`N`) below 5%. It is within about 1.5
+  points of the official 2024-2026 KS2 tables on average (evidence in
+  [`notebooks/02_conversion_curves.py`](notebooks/02_conversion_curves.py) and
+  [ADR 0002](docs/adr/0002-scaled-score-curve.md)). The real tables aren't
+  applied directly because an Atom assessment isn't the KS2 paper they were
+  calibrated on.
 - **Assumes** an Atom assessment is about as hard as a KS2 paper and one
   question is worth one mark. With more data, question difficulty could be
   estimated from Atom responses to adjust for this.

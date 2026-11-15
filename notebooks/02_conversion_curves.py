@@ -23,9 +23,8 @@ def _(mo):
     % correct on an Atom assessment should map onto the 80-120 scale, and
     whether one algorithm can cover subjects that have no KS2 test.
 
-    **Data:** `seeds/ks2_scaled_score_conversion.csv`, built from the GOV.UK
-    tables in `reference_docs/` by `scripts/build_ks2_conversion_seed.py`
-    (2024-2026; reading /50, maths /110, GPS /70). Sections 1-8 run offline;
+    **Data:** `seeds/ks2_scaled_score_conversion.csv`, a copy of the GOV.UK
+    tables in `reference_docs/` (2024-2026; reading /50, maths /110, GPS /70). Sections 1-8 run offline;
     section 9 queries BigQuery.
     """)
     return
@@ -607,7 +606,7 @@ def _(mo):
     - Fitted $p_{cut}$ sits at 0.48-0.54 in every table: the expected standard
       is consistently "about half the marks".
 
-    ## 8. Decision
+    ## 8. First decision (superseded by section 9)
 
     | Option | Maths / English | Other subjects | Reproducible as | Faithfulness |
     |---|---|---|---|---|
@@ -615,7 +614,7 @@ def _(mo):
     | B. Real tables + logit formula | KS2 table | universal formula | seed + 1 SQL expression | exact / ~1 pt |
     | **C. Logit formula everywhere** | universal formula | universal formula | 1 SQL expression | ~1 pt |
 
-    **Chosen: C.** The real tables convert marks on one specific KS2 paper;
+    **Chosen at first: C**, later simplified to linear rescaling (section 9). The real tables convert marks on one specific KS2 paper;
     an Atom assessment is a different test, so reading its % off a KS2 table
     is no more "real" than the formula. One KS2-shaped curve for every
     subject keeps the method uniform and explainable:
@@ -637,7 +636,196 @@ def _(mo):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 9. The formula on Atom data
+    ## 9. A simpler, standard formula: linear rescaling
+
+    The logit formula fits well but needs a derivation to explain. The most
+    standard tool is plain **linear (min-max) rescaling** of the proportion
+    correct $p$ onto the 80-120 scale:
+
+    $$SC = \lfloor 80 + 40p \rfloor \qquad (0\% \to 80,\; 50\% \to 100,\; 100\% \to 120;\ \text{N if } p < 0.05)$$
+
+    No fitted constants, no clamping; each 2.5% correct is one scaled point.
+    How does it look against the official KS2 tables?
+    """)
+    return
+
+
+@app.cell
+def _(np):
+    MIN_P = 0.05
+
+    def linear_score(correct: np.ndarray, total: np.ndarray) -> np.ndarray:
+        """floor(80 + 40 * correct / total) in exact integer arithmetic; -1 = N."""
+        correct = np.asarray(correct, dtype=np.int64)
+        total = np.asarray(total, dtype=np.int64)
+        score = 80 + (40 * correct) // total
+        return np.where(20 * correct < total, -1, score)  # p < 0.05 -> N
+
+    return MIN_P, linear_score
+
+
+@app.cell
+def _(UNIVERSAL_K, UNIVERSAL_P_CUT, linear_score, logit_formula, pl, scored):
+    formulas_vs_tables = scored.with_columns(
+        linear=pl.Series(
+            linear_score(scored["raw_score"].to_numpy(), scored["max_marks"].to_numpy())
+        ),
+        logit=pl.Series(
+            logit_formula(
+                (scored["raw_score"] / scored["max_marks"]).to_numpy(),
+                UNIVERSAL_K,
+                UNIVERSAL_P_CUT,
+            )
+        ).cast(pl.Int64),
+    ).with_columns(pl.col("linear").replace(-1, None))
+
+    def _errors(by: list[str]) -> pl.DataFrame:
+        _d = formulas_vs_tables.drop_nulls("linear")
+        return (
+            _d.group_by(by)
+            .agg(
+                linear_mean_abs_error=(pl.col("linear") - pl.col("scaled_score"))
+                .abs()
+                .mean()
+                .round(2),
+                linear_max_abs_error=(pl.col("linear") - pl.col("scaled_score"))
+                .abs()
+                .max(),
+                logit_mean_abs_error=(pl.col("logit") - pl.col("scaled_score"))
+                .abs()
+                .mean()
+                .round(2),
+                logit_max_abs_error=(pl.col("logit") - pl.col("scaled_score"))
+                .abs()
+                .max(),
+                linear_agrees_on_expected_standard_pct=(
+                    100
+                    * (
+                        (pl.col("linear") >= 100) == (pl.col("scaled_score") >= 100)
+                    ).mean()
+                ).round(1),
+            )
+            .sort(by)
+        )
+
+    _errors(["ks2_subject", "test_year"])
+    return (formulas_vs_tables,)
+
+
+@app.cell
+def _(alt, formulas_vs_tables, mo, pl, year_picker):
+    _year = int(year_picker.value)
+    _d = formulas_vs_tables.filter(pl.col("test_year") == _year)
+    _long = pl.concat(
+        [
+            _d.select(
+                "ks2_subject",
+                "pct_of_marks",
+                "scaled_score",
+                curve=pl.lit("official table"),
+            ),
+            _d.select(
+                "ks2_subject",
+                "pct_of_marks",
+                pl.col("linear").alias("scaled_score"),
+                curve=pl.lit("linear 80 + 40p"),
+            ),
+            _d.select(
+                "ks2_subject",
+                "pct_of_marks",
+                pl.col("logit").alias("scaled_score"),
+                curve=pl.lit("logit (previous choice)"),
+            ),
+        ]
+    ).drop_nulls("scaled_score")
+    _chart = (
+        alt.Chart(_long)
+        .mark_line(interpolate="step-after")
+        .encode(
+            x=alt.X("pct_of_marks:Q", title="% of available marks"),
+            y=alt.Y(
+                "scaled_score:Q",
+                title="Scaled score",
+                scale=alt.Scale(domain=[78, 122]),
+            ),
+            color=alt.Color(
+                "curve:N",
+                title="Curve",
+                scale=alt.Scale(
+                    domain=[
+                        "official table",
+                        "linear 80 + 40p",
+                        "logit (previous choice)",
+                    ],
+                    range=["#1f77b4", "black", "#bbbbbb"],
+                ),
+            ),
+            strokeWidth=alt.condition(
+                alt.datum.curve == "linear 80 + 40p", alt.value(2.5), alt.value(1.5)
+            ),
+            tooltip=["ks2_subject", "pct_of_marks", "curve", "scaled_score"],
+        )
+        .properties(width=230, height=260)
+        .facet(column=alt.Column("ks2_subject:N", title=f"KS2 {_year}"))
+    )
+    mo.ui.altair_chart(_chart)
+    return
+
+
+@app.cell
+def _(alt, formulas_vs_tables, mo, pl, year_picker):
+    # Where the linear formula is too generous (> 0) or too harsh (< 0).
+    _d = (
+        formulas_vs_tables.filter(pl.col("test_year") == int(year_picker.value))
+        .drop_nulls("linear")
+        .with_columns(linear_minus_table=pl.col("linear") - pl.col("scaled_score"))
+    )
+    mo.ui.altair_chart(
+        (
+            alt.Chart(_d)
+            .mark_line(interpolate="step-after")
+            .encode(
+                x=alt.X("pct_of_marks:Q", title="% of available marks"),
+                y=alt.Y("linear_minus_table:Q", title="Linear minus official (points)"),
+                color=alt.Color("ks2_subject:N", title="Subject"),
+            )
+            + alt.Chart(pl.DataFrame({"y": [0]}))
+            .mark_rule(color="black")
+            .encode(y="y:Q")
+        ).properties(
+            width=650,
+            height=220,
+            title=f"Linear formula error vs the {year_picker.value} tables",
+        )
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    **Findings** (all nine tables, raw scores that get a score):
+    - Mean error **1.55 points** (logit: 0.97), max **5** for both.
+    - By subject: GPS 0.9-1.1, reading 0.9-1.4, **maths 1.9-2.4**. Maths is
+      the outlier because its curve is flattest in the middle and steepest at
+      the ends, so a straight line is **harsh below 20%** (about -1.8 points)
+      and **generous above 80%** (about +2.6). GPS comes out slightly harsh
+      throughout, reading slightly generous.
+    - It agrees with the official tables on "met the expected standard" for
+      94-100% of raw scores.
+
+    **Chosen: linear rescaling** - a standard, assumption-light tool that is
+    easy to explain, at a cost of about 0.6 points of accuracy on average
+    (mostly in maths at the extremes). The logit formula above stays
+    documented as the more faithful alternative.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 10. The formula on Atom data
 
     Qualifying sittings from `de_raw` (complete, not deleted, not survey /
     adaptive, year group ≤ 6; one answer per question, correct only if every
@@ -699,14 +887,20 @@ def _(pl):
 
 
 @app.cell
-def _(atom_sittings, logit_formula, pl, tables):
-    K, P_CUT, MIN_P = 7.3, 0.5, 0.05
+def _(atom_sittings, linear_score, logit_formula, pl, tables):
+    K, P_CUT = 7.3, 0.5
     KS2_TABLE_FOR = {"Maths": ("maths", 110), "English": ("reading", 50)}
 
     _p = (atom_sittings["correct"] / atom_sittings["questions"]).to_numpy()
     atom_scored = atom_sittings.with_columns(
         p=pl.Series(_p),
-        scaled_score=pl.when(pl.Series(_p) >= MIN_P).then(
+        scaled_score=pl.Series(
+            linear_score(
+                atom_sittings["correct"].to_numpy(),
+                atom_sittings["questions"].to_numpy(),
+            )
+        ).replace(-1, None),
+        logit_score=pl.when(pl.Series(_p) >= 0.05).then(
             pl.Series(logit_formula(_p, K, P_CUT)).cast(pl.Int64)
         ),
     )
@@ -753,7 +947,7 @@ def _(alt, atom_scored, mo):
             row=alt.Row("subject_name:N", title=None),
         )
         .properties(
-            width=600, height=70, title="Scaled score per sitting (logit formula)"
+            width=600, height=70, title="Scaled score per sitting (linear formula)"
         )
     )
     return
