@@ -38,11 +38,36 @@ one), separated by folder and the `<layer>__<entity>` model-name prefix:
 
 ## What I built
 
-_TODO_
+`gold__pupil_subject_scores` (BigQuery `owen_cain`): a KS2-style scaled score
+(80-120) for every pupil in every subject they have a scorable sitting in, as a
+**type-2 history**, one row per scored sitting.
+
+```sql
+-- current scores
+select * from owen_cain.gold__pupil_subject_scores where is_current;
+
+-- scores as they stood at time T
+select * from owen_cain.gold__pupil_subject_scores
+where valid_from <= @t and (valid_to > @t or valid_to is null);
+```
 
 ## How the pieces fit together
 
-_TODO_
+```
+de_raw (sources, bronze) ─┬─ silver__sittings        every sitting + is_scorable / exclusion_reason
+                          ├─ silver__answers         one answer per (sitting, question), duplicates collapsed
+                          └─ silver__sitting_scores  floor(80 + 40 * correct / questions)
+                                       └─ gold__pupil_subject_scores  type-2 history per pupil × subject
+```
+
+- `macros/ks2_scaled_score.sql`: the scoring formula, in one place; the
+  minimum for a score is a dbt var in `dbt_project.yml`.
+- `seeds/ks2_scaled_score_conversion.csv`: official KS2 tables (2024-2026),
+  used to calibrate and check the formula, not for scoring.
+- Notebooks: `01_exploration` (data profiling), `02_conversion_curves`
+  (choosing the formula), `03_reconciliation` (checks the pipeline end to end:
+  row accounting, duplicates, nulls, input gaps, point-in-time history,
+  independent recalculation, idempotency, and our curve vs the KS2 curves).
 
 ## Data quality issues
 
@@ -64,6 +89,9 @@ Evidence for each is in [`notebooks/01_exploration.py`](notebooks/01_exploration
   incomplete sittings lack a `finished_at`.
 - **Soft deletes:** no pupil or sitting is currently marked `is_deleted`.
 - **Year groups:** 25 sittings (entrance exams) are in years 11, 14 and 15.
+- **Missing answers:** 49 scored sittings have fewer answers than
+  `total_questions`, with holes in the `question_number` sequence. Missing
+  questions aren't counted (as if not asked).
 - **Unused rows:** 61 pupils have no sittings, 79 sittings have no responses,
   and 8,096 of 10,552 questions in `course_hierarchy` have never been answered.
 
