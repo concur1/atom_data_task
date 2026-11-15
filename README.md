@@ -353,5 +353,5 @@ it up:
   suite (lint, type checks, `dbt build` with tests) before Claude can
   `git push`, the same checks as the git pre-push hook and CI.
 
-The full session is included with the submission as `ai_chat_log.txt` (with an
-access token redacted).
+The full session is in [`ai_chat_log.txt`](ai_chat_log.txt) (a Claude Code
+`/export`, with an access token redacted).
